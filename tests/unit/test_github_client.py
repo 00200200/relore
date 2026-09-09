@@ -148,3 +148,62 @@ def test_following_a_link_url_keeps_its_query_string() -> None:
     got = list(_client(handler).paginate("x"))
     assert [i["id"] for i in got] == [1, 2, 3]
     assert seen_pages == [None, "2", "3"]
+
+
+def test_a_dropped_connection_is_retried_rather_than_ending_the_walk() -> None:
+    """The failure that turned a production backfill into a crash loop.
+
+    A 5xx is an answer and was always retried; `RemoteProtocolError` is the absence of
+    one, arrived as an exception outside the retry loop, and killed the process. Over the
+    day-long walk section 3 sizes, GitHub closed a connection mid-body every few minutes.
+    """
+    attempts: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = request.url.params.get("page")
+        attempts.append(page)
+        if attempts.count(page) == 1:
+            raise httpx.RemoteProtocolError(
+                "peer closed connection without sending complete message body"
+            )
+        headers = {"Content-Type": "application/json"}
+        current = int(page or 1)
+        if current < 2:
+            headers["Link"] = f'<{BASE}/x?page={current + 1}>; rel="next"'
+        return httpx.Response(200, content=json.dumps([{"id": current}]).encode(), headers=headers)
+
+    got = list(_client(handler).paginate("x"))
+    assert [i["id"] for i in got] == [1, 2], "the walk must continue, not stop at the drop"
+    assert attempts == [None, None, "2", "2"], "the same page is re-asked, never skipped"
+
+
+def test_a_transport_error_backs_off_and_then_gives_up_as_a_github_error() -> None:
+    """Exhaustion is the client's own error type, so callers catch one thing."""
+    slept: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = GitHubClient(
+        "t",
+        base_url=BASE,
+        client=httpx.Client(transport=httpx.MockTransport(handler), base_url=BASE),
+        sleep=slept.append,
+        max_retries=3,
+    )
+    with pytest.raises(GitHubError, match="ConnectError"):
+        client.get_json("x")
+    assert slept == [1.0, 2.0, 4.0], "one sleep per retry, doubling, none after the last"
+
+
+def test_a_request_we_built_wrong_is_not_retried() -> None:
+    """`LocalProtocolError` is our bug, not the network's; asking again cannot fix it."""
+    calls = {"n": 0}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.LocalProtocolError("illegal header value")
+
+    with pytest.raises(httpx.LocalProtocolError):
+        _client(handler).get_json("x")
+    assert calls["n"] == 1

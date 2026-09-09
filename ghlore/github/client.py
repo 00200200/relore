@@ -10,6 +10,12 @@ Two shapes of pagination, because section 3 measured two different limits:
 * :meth:`GitHubClient.paginate_since_chained` is for the endpoints hard-capped at 30,000
   items, where ``since`` combined with ``direction=asc`` does **not** lift the cap. It
   takes a slice, reads the last item's timestamp, and uses it as the next ``since``.
+
+Both shapes go through :meth:`GitHubClient.request`, which retries on two different
+signals: a status GitHub returned (5xx, or a rate limit), and an exception no status came
+back with (a dropped connection, a timeout). The second is not decoration — section 3
+sizes a large repository at a restartable day, and over that many requests a transport
+failure is routine; unretried it ends the process mid-walk.
 """
 
 from __future__ import annotations
@@ -30,6 +36,17 @@ API_VERSION = "2022-11-28"
 
 # Section 3: the cap is 300 pages x 100 items on the comment endpoints.
 SLICE_CAP = 30_000
+
+# Transport failures worth asking again about, because they are not answers about the
+# resource: a dropped connection, a timeout, a peer that closed mid-body. A GET is
+# idempotent, so a second ask is safe. `LocalProtocolError` and `UnsupportedProtocol` are
+# deliberately absent — those describe a request we built wrong, and a retry cannot fix it.
+TRANSIENT_TRANSPORT_ERRORS = (
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.RemoteProtocolError,
+    httpx.ProxyError,
+)
 
 
 class GitHubError(RuntimeError):
@@ -87,7 +104,20 @@ class GitHubClient:
         target = url if url.startswith("http") else f"{self.base_url}/{url.lstrip('/')}"
         last: httpx.Response | None = None
         for attempt in range(self.max_retries + 1):
-            response = self._client.get(target, params=params)
+            try:
+                response = self._client.get(target, params=params)
+            except TRANSIENT_TRANSPORT_ERRORS as exc:
+                # Section 3 sizes a large repository at a restartable day, and over that
+                # many requests a dropped connection is routine rather than exceptional.
+                # Left to propagate it ends the process, which costs a re-walk of the
+                # current page and turns a healthy walk into a crash loop.
+                if attempt == self.max_retries:
+                    raise GitHubError(
+                        f"{type(exc).__name__} from {target} after "
+                        f"{self.max_retries} retries: {exc}"
+                    ) from exc
+                self._back_off(type(exc).__name__, target, attempt)
+                continue
             if response.status_code < 400:
                 return response
             last = response
@@ -98,17 +128,25 @@ class GitHubClient:
             wait = self._retry_after(response, attempt)
             if wait is None or attempt == self.max_retries:
                 break
-            log.warning(
-                "GitHub %s on %s; sleeping %.0fs (attempt %d/%d)",
-                response.status_code,
-                target.removeprefix(self.base_url),
-                wait,
-                attempt + 1,
-                self.max_retries,
-            )
-            self._sleep(wait)
+            self._back_off(response.status_code, target, attempt, wait)
         assert last is not None
         raise GitHubError(f"{last.status_code} from {target}: {last.text[:200]}")
+
+    def _back_off(
+        self, reason: object, target: str, attempt: int, wait: float | None = None
+    ) -> None:
+        """Log and sleep. One schedule and one message, so both retry paths read alike."""
+        if wait is None:
+            wait = min(2.0**attempt, 60.0)
+        log.warning(
+            "GitHub %s on %s; sleeping %.0fs (attempt %d/%d)",
+            reason,
+            target.removeprefix(self.base_url),
+            wait,
+            attempt + 1,
+            self.max_retries,
+        )
+        self._sleep(wait)
 
     def _retry_after(self, response: httpx.Response, attempt: int) -> float | None:
         """Seconds to wait, or None if this status is not worth retrying."""

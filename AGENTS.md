@@ -23,7 +23,7 @@ can be used: everything left is gated on evidence a laptop cannot produce.
 
 **The build plan is not in this repository.** It and its evidence base are held with the
 deployment that commissioned them — see the note below. Every `section N` reference in this
-codebase points into it, and §15.4 records what the first deploy taught. Do not start
+codebase points into it, and §15.3 records what the first deploy taught. Do not start
 milestone 4 without reading it.
 
  Milestone 3 landed in six pieces: §6.2's authority
@@ -33,7 +33,7 @@ what it measured), **§6's query expansion** (§10.4), and **§6's weighted rank
 (§10.5). `ghlored migrate |
 fetch | backfill | sample | derive | poll | sweep | authority | mine | judge | bench |
 serve | status` and `ghlore search | thread | status | map | defs | refs` work end to end.
-~10,000 lines under `ghlore/`, **615 tests**, every store-level and retrieval-level one on
+~10,000 lines under `ghlore/`, **638 tests**, every store-level and retrieval-level one on
 both dialects. The `--file`/`--symbol`/`--error`/`--test` filters answer. **Retrieval is
 ranked**: full text, filters, the trust floor, the expansion fan-out and §6's weighted
 score. Kind-aware decay is built and **gated off** (`ranking.DECAY_ENABLED`) — §6's table
@@ -49,9 +49,12 @@ from, built because the *rate* of bot review comments is what that slice is shor
 the volume. Cursor pagination is now
 exercised for real — the transformers listing walk followed 50+ pages of `after=` cursors —
 along with the GraphQL per-PR pass, `authority`, and idempotency (a re-derive of all 1,750
-threads wrote **0 documents**). The **30,000-item comment cap** is still fixture-covered
-only: `sample` fetches per thread and so never walks `/issues/comments`, and no backfill has
-run against a repository large enough. That is the remaining unproven limit.
+threads wrote **0 documents**). The **30,000-item comment cap is now
+exercised for real too**: the full-history backfill of `huggingface/transformers` staged
+**186,540** issue comments, six times the cap, so the `since`-chaining walk of §3 #2 has
+walked a corpus that a page-counting one could not have. It was the last unproven limit —
+the earlier samples could not reach it, because `sample` fetches per thread and so never
+walks `/issues/comments` at all.
 
 Extraction was measured on that index: 616 file rows over 222 distinct paths, 522 symbols,
 173 commits — and **2 errors and 2 test ids**. serge's PR discussions rarely paste a
@@ -361,6 +364,16 @@ backfill written without them looks successful while missing most of the corpus:
 - `GET /pulls/comments` is **not** capped.
 - There is **no repository-wide reviews endpoint** → batch over GraphQL (~25 PRs/query),
   merged PRs only. On the backfill path this is the *only* source of review bodies.
+
+**A 5xx is an answer; a dropped connection is not, and both have to be retried.**
+`request` retries on two different signals — a status (5xx, or a rate limit) and an
+exception that arrived with no status at all (`TRANSIENT_TRANSPORT_ERRORS`). Only the first
+existed until the first production backfill, where GitHub closed a connection mid-body
+every few minutes: the exception propagated straight out of the retry loop and the Job
+restarted **five times in 101 minutes**. §5.2's per-pass cursors made that survivable
+rather than lossy, which is precisely why it was cheap to miss — the walk still converged,
+just in fourteen-minute pieces. `LocalProtocolError` is deliberately *not* retried: that
+one describes a request we built wrong, and asking again cannot fix it.
 
 **Deletion has to reach `raw_objects`.** Staging is an upsert, so a deleted comment stays
 staged and every later `derive` rebuilds its document. A thread fetch is authoritative for
