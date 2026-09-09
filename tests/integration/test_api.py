@@ -392,3 +392,36 @@ def test_serve_refuses_a_public_bind_with_no_tokens(monkeypatch, tmp_path) -> No
 
     with pytest.raises(SystemExit, match="no tokens configured"):
         serve(f"sqlite:///{tmp_path / 'x.db'}", host="0.0.0.0", port=0, allow_sqlite=True)
+
+
+def test_every_page_helper_is_declared_before_it_is_used() -> None:
+    """The whole UI died in production on this, and nothing here caught it.
+
+    `const` is hoisted but not initialized, so using a helper above its declaration is a
+    ReferenceError at load. That aborts the *entire* script, which means the search form
+    never gets its submit handler and the browser falls back to a native GET of
+    `/?q=...`: the page renders, the access log says 200, and nothing searches. Shipped
+    2026-09-09 with `esc` declared ~180 lines below the sample-button strip that calls it.
+
+    A syntax check cannot see this (the file parses), and neither can a test that only
+    asserts the page is served. What is asserted here is the ordering itself.
+    """
+    raw = ui.page().split("<script>", 1)[1].split("</script>", 1)[0]
+    # Comments mention these helpers by name, including this bug's own explanation, so
+    # scan the code only -- a prose match would make the assertion meaningless.
+    script = "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("//"))
+    for name in ("esc", "split", "quote", "short", "readable"):
+        declared = min(
+            (
+                i
+                for i in (script.find(f"const {name} ="), script.find(f"function {name}("))
+                if i >= 0
+            ),
+            default=-1,
+        )
+        assert declared >= 0, f"{name} is referenced by this test but no longer declared"
+        used = script.find(f"{name}(")
+        assert used < 0 or declared <= used, (
+            f"{name} is used at offset {used} but only declared at {declared}; "
+            "at load time that is a ReferenceError which kills the whole page script"
+        )

@@ -217,6 +217,20 @@ ghlore status</pre>
 
 <script>
 const $ = (s) => document.querySelector(s);
+
+// These four sit at the top because `const` is hoisted but not initialized, and the
+// sample-button strip below renders `esc(...)` at load time. Declared after their
+// first use that is a ReferenceError, and it aborts the whole script -- so the search
+// form loses its submit handler and the browser falls back to a native GET of
+// `/?q=...`. The page still renders, the access log still says 200, and nothing
+// searches. Shipped that way on 2026-09-09 and found by a person opening the page,
+// which is exactly what section 8 says the UI is for.
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const split = (s) => String(s || "").split(",").map((x) => x.trim()).filter(Boolean);
+const quote = (s) => /[\\s"']/.test(s) ? "'" + String(s).replace(/'/g, "'\\\\''") + "'" : s;
+const short = (iso) => iso ? String(iso).slice(0, 16).replace("T", " ") : "never";
+
 const token = $("#token");
 token.value = localStorage.getItem("ghlore-token") || "";
 token.addEventListener("change", () => localStorage.setItem("ghlore-token", token.value));
@@ -440,12 +454,6 @@ document.addEventListener("click", async (event) => {
       `<span class="error">labelling: ${esc(body.detail || r.status)}</span>`;
   }
 });
-
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
-  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const split = (s) => String(s || "").split(",").map((x) => x.trim()).filter(Boolean);
-const quote = (s) => /[\\s"']/.test(s) ? "'" + String(s).replace(/'/g, "'\\\\''") + "'" : s;
-const short = (iso) => iso ? String(iso).slice(0, 16).replace("T", " ") : "never";
 
 health();
 </script>
