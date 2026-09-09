@@ -22,3 +22,11 @@ credentials are not.
 {{- define "ghlore.databaseUrl" -}}
 postgresql+psycopg://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@{{ include "name" . }}-postgres:5432/{{ .Values.postgres.database }}
 {{- end -}}
+
+{{/*
+The verbosity flag, as argv entries. `-v` is a top-level flag on `ghlored`, so it
+has to precede the subcommand -- `ghlored -v poll`, never `ghlored poll -v`.
+*/}}
+{{- define "ghlore.verbosity" -}}
+{{- if eq (int .Values.verbosity) 1 }}"-v", {{ else if ge (int .Values.verbosity) 2 }}"-vv", {{ end }}
+{{- end -}}

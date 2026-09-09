@@ -78,7 +78,11 @@ echo
 
 "${kube[@]}" delete job "$job" --ignore-not-found >/dev/null
 
-args="[\"backfill\", \"--repo\", \"$repo\""
+# `-v` is not optional in practice. `ghlored` defaults to WARNING and every
+# progress message it has is INFO, so without this a day-long backfill stages
+# hundreds of thousands of objects and prints nothing at all -- the only way to
+# tell a healthy run from a wedged one is to query the database.
+args="[\"-v\", \"backfill\", \"--repo\", \"$repo\""
 for a in ${extra[@]+"${extra[@]}"}; do args="$args, \"$a\""; done
 args="$args]"
 

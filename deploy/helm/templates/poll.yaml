@@ -45,7 +45,7 @@ spec:
         - name: poll
           image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
-          args: ["poll", "--repo", {{ $repo | quote }}, "--interval", {{ $.Values.poll.interval | quote }}]
+          args: [{{ include "ghlore.verbosity" $ }}"poll", "--repo", {{ $repo | quote }}, "--interval", {{ $.Values.poll.interval | quote }}]
           envFrom:
             - configMapRef:
                 name: {{ include "name" $ }}-config

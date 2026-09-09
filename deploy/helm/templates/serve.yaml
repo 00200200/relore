@@ -64,7 +64,7 @@ spec:
               until pg_isready -h {{ include "name" . }}-postgres -U {{ .Values.postgres.user }} >/dev/null 2>&1; do
                 echo "waiting for postgres"; sleep 3
               done
-              exec ghlored migrate
+              exec ghlored {{ if ge (int .Values.verbosity) 1 }}-v {{ end }}migrate
           env:
             - name: POSTGRES_PASSWORD
               valueFrom:
@@ -78,7 +78,7 @@ spec:
         - name: serve
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+          args: [{{ include "ghlore.verbosity" . }}"serve", "--host", "0.0.0.0", "--port", "8080"]
           ports:
             - name: http
               containerPort: 8080

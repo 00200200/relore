@@ -6,6 +6,14 @@
 # an environment. Nothing in this file is a credential, and nothing in it should
 # become one — see `externalSecret` below.
 
+# How much the daemon says. `ghlored` defaults to WARNING, which for a poll loop or
+# a day-long backfill means **complete silence while it works** -- 180,000 objects
+# staged and not one line of output, so the only way to tell a healthy run from a
+# wedged one is to query the database. Every progress message it has is INFO.
+#
+# 0 = warnings only (the CLI default), 1 = -v / INFO, 2 = -vv / DEBUG.
+verbosity: 1
+
 image:
   repository: ghcr.io/huggingface/ghlore
   tag: latest
