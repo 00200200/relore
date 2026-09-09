@@ -17,10 +17,14 @@ survive a context window.
 
 ## Where things stand
 
-**Milestones 0–3 are done, and building is paused here to deploy and use it** — build plan
-§15 records the decision, §15.1 the one thing to settle before a production backfill, and
-§15.2 what the deployment needs that this repository does not have. Do not start milestone
-4 without checking §15 first.
+**Milestones 0–3 are done, and it is deployed** (2026-09-09) — Postgres, `ghlored serve`
+and a poll loop in a Kubernetes namespace, from `deploy/`. Building is paused so the thing
+can be used: everything left is gated on evidence a laptop cannot produce.
+
+**The build plan is not in this repository.** It and its evidence base are held with the
+deployment that commissioned them — see the note below. Every `section N` reference in this
+codebase points into it, and §15.4 records what the first deploy taught. Do not start
+milestone 4 without reading it.
 
  Milestone 3 landed in six pieces: §6.2's authority
 resolution with the query-kind trust floors (§13.1 #9), **§5.3's extraction pass**,

@@ -9,6 +9,25 @@ removed, which approach was tried and rejected, what a maintainer made the last 
 contributors change. An agent fixing a bug cannot read any of it. `ghlore` makes it
 queryable.
 
+## Try it
+
+```bash
+pip install ghlore                     # the client: an HTTP client, nothing else
+export GHLORE_API=https://your-ghlore  # a running `ghlored serve`
+export GHLORE_TOKEN=…                  # if that daemon requires one
+
+ghlore search "AttributeError: 'NoneType' object has no attribute 'shape'" --kind failure
+ghlore search "why is this cast here" --kind rationale --file src/model.py
+ghlore thread 47720 --focus "cropping"
+```
+
+The daemon's own web page carries worked examples, the CLI setup for *that* index, and a
+snippet for a `CLAUDE.md` / `AGENTS.md`. There is no MCP server on purpose: any agent with
+a shell can already call an HTTP API.
+
+Running it needs a Postgres and a GitHub token with `issues:read` + `pull_requests:read` —
+never write. `deploy/` has a Helm chart and the scripts that are its interface.
+
 ## Why not GitHub search
 
 For one-off human lookups `/search/issues` is often the right tool: authoritative,
