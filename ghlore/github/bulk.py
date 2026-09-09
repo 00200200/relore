@@ -93,11 +93,25 @@ def walk_review_comments(
 ) -> Iterator[BulkObject]:
     """Every inline review comment. Not capped -- this one walks straight through.
 
-    1,349 pages at ``per_page=100`` on the reference repository, and the highest-value
-    pass in the backfill: roughly three-quarters of the mentions of a technical symbol
-    live in comments, and the file-and-line ones are what the code lens later resolves.
+    The highest-value pass in the backfill: roughly three-quarters of the mentions of a
+    technical symbol live in comments, and the file-and-line ones are what the code lens
+    later resolves.
+
+    **This one walks at ``per_page=50``, and the halving is not caution.** A review
+    comment carries its ``diff_hunk``, so a page here is far heavier than a page of
+    issue comments, and GitHub cannot always build one. Measured 2026-09-09, on the page
+    that wedged the production backfill of `huggingface/transformers` for good:
+
+        per_page=100 -> HTTP 504 Gateway Timeout (502 from inside the cluster)
+        per_page=50  -> HTTP 200, 50 items
+        per_page=30  -> HTTP 200, 30 items
+
+    No retry policy can help, which is what makes this a page-size problem rather than a
+    transport one: the walk resumes from the same ``since``, asks for the same 100 items,
+    and GitHub times out again for ever. It cost ~1,349 pages at 100 and costs ~2,700 at
+    50 -- affordable against 5,000 requests/hour, and this endpoint is not capped (§3).
     """
-    params: dict[str, Any] = {"sort": "created", "direction": "asc"}
+    params: dict[str, Any] = {"sort": "created", "direction": "asc", "per_page": 50}
     if since:
         params["since"] = since
     for item in client.paginate(f"repos/{repo}/pulls/comments", params):
