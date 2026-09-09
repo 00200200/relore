@@ -12,7 +12,7 @@ data:
   # Section 11: an allowlist, never a denylist, and re-checked per thread. A
   # denylist would be one forgotten entry away from publishing private discussion
   # into a public answer.
-  GHLORE_ALLOWED_REPOS: {{ join "," .Values.poll.repos | quote }}
+  GHLORE_ALLOWED_REPOS: {{ join "," (.Values.allowedRepos | default .Values.poll.repos) | quote }}
   # Section 6.2's bot-account list. `user.type == "Bot"` catches the accounts
   # GitHub knows are apps; this catches the ones it does not --
   # `HuggingFaceDocBuilderDev` presents as a `User` and a `MEMBER`, so without it

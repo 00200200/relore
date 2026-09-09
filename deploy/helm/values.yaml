@@ -63,10 +63,33 @@ serve:
 # ---------------------------------------------------------------------------
 # The poll loop — one Deployment per repository (section 5.2)
 # ---------------------------------------------------------------------------
+# Section 11's repository allowlist: an allowlist, never a denylist, because a
+# denylist is one forgotten entry away from publishing private discussion into a
+# public answer. It is re-checked per thread.
+#
+# **Separate from `poll.repos` on purpose**, and conflating them was a bug. What may
+# be *searched* and what gets a *poller* are different questions: a sampled corpus
+# has to be searchable without being polled (see below), and defaulting one to the
+# other silently made a bounded corpus unsearchable the moment its poller was
+# removed. Empty means "whatever is polled", which is right only when every indexed
+# repository is a full history.
+allowedRepos: []
+
 poll:
-  # Also the repository allowlist (section 11): an allowlist, never a denylist,
-  # because a denylist is one forgotten entry away from publishing private
-  # discussion into a public answer.
+  #
+  # **A repository listed here gets its FULL history.** With no high-water mark
+  # `poll` walks from the start (`ingest/poll.py`: "no high-water mark yet, walking
+  # from the start"), and section 5.5 is explicit that `ghlored sample` checkpoints
+  # under its own pass name and deliberately does **not** move the `threads` mark --
+  # so sampling a repository first does not bound its poller either. That is by
+  # design: the shared mark must never claim to cover years nobody walked.
+  #
+  # The consequence for this chart is blunt: **do not list a repository you only
+  # want a sample of.** Sampling is a one-off `ghlored sample --since`, and a sampled
+  # corpus stays current by re-running it, not by polling. Listing one here quietly
+  # converts a bounded corpus into a full backfill -- a day of API budget for a large
+  # repository, and a corpus that no longer matches the window section 10's numbers
+  # were measured against.
   repos: []
   interval: 5m
   resources:

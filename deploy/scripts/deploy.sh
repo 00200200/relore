@@ -116,6 +116,9 @@ fi
 
 # `${a[@]+"${a[@]}"}`, not `"${a[@]}"`: under `set -u`, bash 3.2 -- which is what
 # macOS ships -- treats an empty array's expansion as an unbound variable.
+kube_ctx=()
+[[ -n "$expected_context" ]] && kube_ctx=(--context "$expected_context")
+
 helm_args=(upgrade --install "$release" "$CHART_DIR" --namespace "$namespace" \
            ${create_namespace[@]+"${create_namespace[@]}"})
 for f in "${values_files[@]}"; do helm_args+=(--values "$f"); done
@@ -126,14 +129,25 @@ if [[ $dry_run -eq 1 ]]; then
 fi
 
 # --- what this deploy would remove ------------------------------------------
-# A values file that drops a key does not fail: helm falls back to the chart
-# default and the workload comes back healthy with the setting silently gone.
-# So diff the keys, not the outcome.
-if helm status "$release" --namespace "$namespace" >/dev/null 2>&1; then
-  live="$(helm get values "$release" --namespace "$namespace" --output json 2>/dev/null || echo '{}')"
+# A values file that drops a key does not fail: helm falls back to the chart default
+# and the workload comes back healthy with the setting silently gone. So diff the
+# keys, not the outcome.
+if helm status "$release" --namespace "$namespace" \
+     ${expected_context:+--kube-context "$expected_context"} >/dev/null 2>&1; then
+  live="$(helm get values "$release" --namespace "$namespace" \
+    ${expected_context:+--kube-context "$expected_context"} --output json 2>/dev/null || true)"
   proposed="$(helm "${helm_args[@]}" --dry-run --output json 2>/dev/null \
-    | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin).get("config") or {}))' 2>/dev/null || echo '{}')"
-  removed="$(python3 - "$live" "$proposed" <<'PY'
+    | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin).get("config") or {}))' 2>/dev/null || true)"
+
+  # An empty result means "could not determine", NEVER "everything was removed".
+  # The difference matters: a dry-run fails for reasons that have nothing to do with
+  # the values -- a release stuck in a failed state, a transient API error -- and a
+  # guard that reads its own failure as a diff refuses every legitimate deploy while
+  # sounding maximally alarming. That happened once; this is the fix.
+  if [[ -z "$live" || "$live" == "null" || -z "$proposed" || "$proposed" == "{}" ]]; then
+    echo "note: could not compare values against the live release; removal check skipped." >&2
+  else
+    removed="$(python3 - "$live" "$proposed" <<'PYEOF'
 import json, sys
 
 def flatten(node, prefix=""):
@@ -144,18 +158,18 @@ def flatten(node, prefix=""):
         yield prefix
 
 live, proposed = (json.loads(a or "{}") for a in sys.argv[1:3])
-gone = sorted(set(flatten(live)) - set(flatten(proposed)))
-print("\n".join(gone))
-PY
+print("\n".join(sorted(set(flatten(live)) - set(flatten(proposed)))))
+PYEOF
 )"
-  if [[ -n "$removed" ]]; then
-    echo "This deploy DROPS settings the live release has:" >&2
-    echo "$removed" | sed 's/^/  - /' >&2
-    if [[ $allow_removals -eq 0 ]]; then
-      echo "Refusing. Re-run with --allow-removals if that is intended." >&2
-      exit 3
+    if [[ -n "$removed" ]]; then
+      echo "This deploy DROPS settings the live release has:" >&2
+      echo "$removed" | sed 's/^/  - /' >&2
+      if [[ $allow_removals -eq 0 ]]; then
+        echo "Refusing. Re-run with --allow-removals if that is intended." >&2
+        exit 3
+      fi
+      echo "Continuing because --allow-removals was given." >&2
     fi
-    echo "Continuing because --allow-removals was given." >&2
   fi
 fi
 
@@ -173,11 +187,29 @@ if [[ $plan -eq 1 ]]; then
   exit 0
 fi
 
-helm "${helm_args[@]}" --wait --timeout "$timeout"
+# No `--wait`. Helm's wait blocks until every resource is "ready", and that
+# includes PersistentVolumeClaims -- but this cluster's StorageClass binds
+# WaitForFirstConsumer, so the backup PVC stays Pending until the nightly CronJob
+# first runs. That is correct behaviour for the PVC and a failed release for helm:
+# the install rolled back twice on a volume that was doing exactly what it should.
+#
+# So wait for the things whose readiness actually means something, by name.
+helm "${helm_args[@]}" --timeout "$timeout"
+
+echo
+for workload in "deploy/${release}" "statefulset/${release}-postgres"; do
+  kubectl "${kube_ctx[@]}" --namespace "$namespace" rollout status "$workload" \
+    --timeout="$timeout" || exit 1
+done
+for d in $(kubectl "${kube_ctx[@]}" --namespace "$namespace" get deploy \
+             -l "app=ghlore" -o name 2>/dev/null | grep -- "-poll-"); do
+  kubectl "${kube_ctx[@]}" --namespace "$namespace" rollout status "$d" --timeout="$timeout" || exit 1
+done
 
 # --- verify, because "Upgrade complete" is not verification -----------------
 kube=(kubectl --namespace "$namespace")
 [[ -n "$expected_context" ]] && kube+=(--context "$expected_context")
+
 
 echo
 echo "== pods =="
