@@ -353,7 +353,7 @@ A green suite that only ever ran SQLite is a green suite about the wrong databas
 
 ## Traps
 
-**The GitHub API lies about its own limits, quietly.** All four were measured, and a
+**The GitHub API lies about its own limits, quietly.** All five were measured, and a
 backfill written without them looks successful while missing most of the corpus:
 
 - `GET /issues?page=N` **422s past ~page 100** → cursor pagination. The client follows
@@ -361,7 +361,13 @@ backfill written without them looks successful while missing most of the corpus:
   following a Link URL makes httpx *drop* the page and loop forever — pass `None`.)
 - `GET /issues/comments` is **hard-capped at 30,000 items**, and `since` + `direction=asc`
   does **not** lift it → chain on the last item's `created_at`.
-- `GET /pulls/comments` is **not** capped.
+- `GET /pulls/comments` is **not** capped, but **cannot always be served at
+  `per_page=100`** -- each comment carries a `diff_hunk`, and GitHub times out building the
+  page (504, or 502 from inside a cluster). The walk asks for **50**; 30 also works, 100
+  does not. This wedged the first production backfill *permanently*, and it is the failure
+  class retries cannot reach: the walk resumes from the same `since`, asks for the same
+  unservable page, and dies identically for ever. **The tell is a `high_water` that stops
+  advancing while the process keeps restarting -- check the mark, not the restart count.**
 - There is **no repository-wide reviews endpoint** → batch over GraphQL (~25 PRs/query),
   merged PRs only. On the backfill path this is the *only* source of review bodies.
 
