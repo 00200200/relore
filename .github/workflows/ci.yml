@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor and the newest. The floor is the one that matters: it is what
+        # catches accidental 3.11+ syntax in a project declaring requires-python >=3.10.
+        python-version: ["3.10", "3.13"]
+    services:
+      # The store tests are parametrized over both dialects and SKIP Postgres when it is
+      # unconfigured. Without this service CI would be green having only ever run SQLite,
+      # which is exactly the failure AGENTS.md warns about. pgvector's image rather than
+      # plain postgres, so migration 2 applies in full -- embedding column included.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: ghlore_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GHLORE_TEST_POSTGRES_URL: postgresql://postgres:test@localhost:5432/ghlore_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # One code path with local development: make builds the venv and runs ruff + pytest.
+      - run: make check PYTHON=python
+      - name: assert the Postgres half actually ran
+        # A silent degradation to a single dialect is the one thing this job exists to
+        # prevent: a green suite that only ever ran SQLite is a green suite about the
+        # wrong database.
+        #
+        # This asserts the *reason*, not the absence of skips. `grep -q skipped` used to
+        # be enough because the Postgres fixture was the only thing in `tests/integration`
+        # that could skip. It no longer is: the section 10.6 regression test skips on
+        # SQLite by name, because `bm25()` cannot rank text it did not MATCH and there is
+        # nothing there to assert. A guard that cannot tell a deliberate skip from the
+        # failure it was written for fails on correct work -- so it matches the fixture's
+        # own message instead.
+        run: |
+          set -o pipefail
+          .venv/bin/pytest -q -rs tests/integration | tee /tmp/parity.txt
+          if grep -q "GHLORE_TEST_POSTGRES_URL to run the Postgres half" /tmp/parity.txt; then
+            echo "::error::the Postgres parity tests were skipped"
+            exit 1
+          fi
+          # ...and prove the Postgres parametrization was collected at all, in case the
+          # fixture is ever renamed out from under the string above. pytest exits 5 for
+          # "no tests collected", which is exactly the question -- a regex over the
+          # summary line would read "0/450 tests collected" as a pass.
+          if ! .venv/bin/pytest -q --collect-only tests/integration -k postgresql >/dev/null; then
+            echo "::error::no Postgres-parametrized tests were collected"
+            exit 1
+          fi

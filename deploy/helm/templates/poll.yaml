@@ -1,0 +1,69 @@
+#------------------------------------------------------------------------------
+# `ghlored poll` -- one Deployment per indexed repository.
+#
+# A Deployment running a loop, not a CronJob, and the reason is build-plan section
+# 5.2 rather than taste: the checkpoint advances per *committed thread* and stops
+# at the first failure, so a pass that is killed mid-way resumes exactly where it
+# stopped. A CronJob that overruns its schedule would start a second writer, and
+# section 4.1 says the poll loop is one writer by design.
+#
+# One replica each, and never more. Two pollers on the same repository are two
+# writers racing on the same `sync_state` row.
+#------------------------------------------------------------------------------
+{{- range $repo := .Values.poll.repos }}
+{{- $slug := $repo | replace "/" "-" | replace "." "-" | lower | trunc 40 | trimSuffix "-" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "name" $ }}-poll-{{ $slug }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{ include "labels.standard" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    # Never two pollers on one repository, not even for the seconds of a rollout.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ include "app.name" $ }}
+      component: poll
+      repo: {{ $slug | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "labels.standard" $ | nindent 8 }}
+        component: poll
+        repo: {{ $slug | quote }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") $ | sha256sum }}
+    spec:
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: poll
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          args: ["poll", "--repo", {{ $repo | quote }}, "--interval", {{ $.Values.poll.interval | quote }}]
+          envFrom:
+            - configMapRef:
+                name: {{ include "name" $ }}-config
+            - secretRef:
+                name: {{ $.Values.existingSecret }}
+          env:
+            # Declared here and *before* the URL on purpose: Kubernetes expands
+            # `$(VAR)` in an env value only from the container's own `env` list,
+            # never from `envFrom`. Taking the password from the Secret via
+            # `envFrom` alone would ship a connection string containing the
+            # literal text `$(POSTGRES_PASSWORD)` — which fails at connect time,
+            # not at render time, so `helm template` would look correct.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.existingSecret }}
+                  key: POSTGRES_PASSWORD
+            - name: GHLORE_DATABASE_URL
+              value: {{ include "ghlore.databaseUrl" $ | quote }}
+          resources: {{ toYaml $.Values.poll.resources | nindent 12 }}
+{{- end }}

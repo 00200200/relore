@@ -1,0 +1,21 @@
+# macOS noise
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# ghlored's working clones (the code lens, build-plan section 1). These are full git
+# repos of other projects -- never commit them here.
+/clones/
+
+# Local development database dumps and any filled config.
+*.sql.gz
+.env
+
+# `infisical init` drops the workspace id here. Never in a repo that may be published.
+.infisical.json

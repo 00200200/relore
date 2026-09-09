@@ -1,0 +1,99 @@
+{{- if .Values.postgres.enabled }}
+#------------------------------------------------------------------------------
+# Postgres 16 with pgvector.
+#
+# A StatefulSet with one replica and a volumeClaimTemplate, not a Deployment: the
+# PVC has to be bound to the pod identity, and section 4.1's write path is one
+# writer by design, so there is nothing to scale here.
+#
+# `pgvector/pgvector:pg16` rather than plain `postgres:16` because migration 2
+# creates the `vector` extension. Nothing writes an embedding in v1 (build-plan
+# section 6.1) -- the column is provisioned, and provisioning it is what keeps
+# the vector tier a later decision instead of a migration nobody can run.
+#------------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "name" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels: {{ include "labels.standard" . | nindent 4 }}
+spec:
+  # Headless: the StatefulSet needs stable DNS, and nothing outside the namespace
+  # should reach the database at all.
+  clusterIP: None
+  selector:
+    app: {{ include "app.name" . }}
+    component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "name" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels: {{ include "labels.standard" . | nindent 4 }}
+spec:
+  serviceName: {{ include "name" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "app.name" . }}
+      component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "labels.standard" . | nindent 8 }}
+        component: postgres
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image }}"
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: POSTGRES_PASSWORD
+            # The image initialises the cluster in this directory; a subdirectory of
+            # the mount, because EBS volumes arrive with a lost+found that initdb
+            # refuses to start on.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "{{ .Values.postgres.user }}", "-d", "{{ .Values.postgres.database }}"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "{{ .Values.postgres.user }}"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources: {{ toYaml .Values.postgres.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.postgres.persistence.storageClass }}
+        storageClassName: {{ .Values.postgres.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence.size | quote }}
+{{- end }}

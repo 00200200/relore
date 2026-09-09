@@ -1,0 +1,242 @@
+"""Section 5.2: the poll loop, and the three rules that keep it from losing threads.
+
+The failure class under test is not a crash -- it is a pass that reports success while a
+thread is never seen again.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+
+import pytest
+from fake_github import FakeGitHub
+from sqlalchemy import Engine, func, select
+
+from ghlore.ingest import poll as poll_mod
+from ghlore.ingest.poll import PASS, parse_interval, poll_once
+from ghlore.store import repository as repo_layer
+from ghlore.store import schema as s
+
+REPO = "owner/name"
+
+
+@pytest.fixture
+def fake() -> FakeGitHub:
+    return FakeGitHub(REPO)
+
+
+def _poll(engine: Engine, fake: FakeGitHub):
+    with fake.client() as client:
+        return poll_once(engine, client, REPO)
+
+
+def _mark(engine: Engine) -> dt.datetime | None:
+    with engine.connect() as conn:
+        return repo_layer.high_water(conn, REPO, PASS)
+
+
+def _document_count(engine: Engine) -> int:
+    with engine.connect() as conn:
+        return int(conn.execute(select(func.count()).select_from(s.documents)).scalar_one())
+
+
+@pytest.mark.parametrize(
+    ("text", "seconds"), [("30s", 30), ("5m", 300), ("2h", 7200), ("1d", 86400), ("90", 90)]
+)
+def test_interval_parsing(text: str, seconds: float) -> None:
+    assert parse_interval(text) == seconds
+
+
+def test_bad_interval_says_what_it_wanted() -> None:
+    with pytest.raises(ValueError, match="5m"):
+        parse_interval("soon")
+
+
+def test_a_first_pass_indexes_everything_and_sets_the_mark(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    fake.add_issue(1, updated_at="2026-01-01T00:00:00Z")
+    fake.add_issue(2, updated_at="2026-02-01T00:00:00Z")
+
+    result = _poll(engine, fake)
+
+    assert (result.moved, result.indexed) == (2, 2)
+    assert result.clean
+    assert _mark(engine) == dt.datetime(2026, 2, 1, tzinfo=dt.timezone.utc)
+
+
+def test_a_second_pass_with_no_changes_writes_nothing(engine: Engine, fake: FakeGitHub) -> None:
+    """The steady state. Section 5.1 makes the re-read free; this proves it stays free."""
+    fake.add_issue(1, updated_at="2026-01-01T00:00:00Z")
+    _poll(engine, fake)
+    before = _document_count(engine)
+
+    second = _poll(engine, fake)
+
+    assert second.documents_written == 0
+    assert _document_count(engine) == before
+
+
+def test_the_mark_is_a_high_water_not_a_wall_clock_window(engine: Engine, fake: FakeGitHub) -> None:
+    """Miss a pass and a wall-clock window loses the gap permanently and invisibly.
+
+    Here the poller is "down" while a thread moves; the persisted mark simply makes the
+    next pass bigger, and nothing is lost.
+    """
+    fake.add_issue(1, updated_at="2026-01-01T00:00:00Z")
+    _poll(engine, fake)
+
+    fake.add_issue(2, updated_at="2026-06-01T00:00:00Z")  # happened while we were away
+    result = _poll(engine, fake)
+
+    assert 2 in {row for row in _indexed_numbers(engine)}
+    assert result.indexed >= 1
+    assert _mark(engine) == dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc)
+
+
+def test_review_activity_is_found_by_the_second_list_query(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """The reason there are two list queries at all.
+
+    A review comment does not reliably bump its thread's ``updated_at``, so a poll driven
+    only by ``/issues?since=`` would never re-read this PR. The PR here is older than the
+    high-water mark, so the issue walk cannot surface it.
+    """
+    fake.add_issue(1, updated_at="2026-03-01T00:00:00Z")
+    pr = fake.add_pr(2, updated_at="2026-01-01T00:00:00Z")
+    _poll(engine, fake)
+    assert _mark(engine) == dt.datetime(2026, 3, 1, tzinfo=dt.timezone.utc)
+
+    fake.add_review_comment(
+        pr, 300, "this belongs in the parent class", created_at="2026-04-01T00:00:00Z"
+    )
+    result = _poll(engine, fake)
+
+    assert result.documents_written == 1
+    with engine.connect() as conn:
+        found = conn.execute(
+            select(s.documents.c.body_text).where(s.documents.c.source_type == "review_comment")
+        ).scalar_one()
+    assert found == "this belongs in the parent class"
+
+
+def test_the_checkpoint_stops_at_the_first_failure(
+    engine: Engine, fake: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bug this shape exists to prevent.
+
+    Threads arrive ascending. If the mark advanced past a failed one -- because a *later*
+    thread committed fine -- that thread would never be seen again, and the pass would
+    report a single failure and otherwise look healthy.
+    """
+    fake.add_issue(1, updated_at="2026-01-01T00:00:00Z")
+    fake.add_issue(2, updated_at="2026-02-01T00:00:00Z")
+    fake.add_issue(3, updated_at="2026-03-01T00:00:00Z")
+
+    real = poll_mod.fetch_thread
+
+    def flaky(client, repo, number):
+        if number == 2:
+            raise RuntimeError("boom")
+        return real(client, repo, number)
+
+    monkeypatch.setattr(poll_mod, "fetch_thread", flaky)
+    result = _poll(engine, fake)
+
+    assert result.failed == [2]
+    assert not result.clean
+    assert result.indexed == 2, "later threads are still indexed; only the mark waits"
+    assert _mark(engine) == dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+
+    # And the next pass re-covers the remainder rather than skipping it.
+    monkeypatch.setattr(poll_mod, "fetch_thread", real)
+    again = _poll(engine, fake)
+    assert 2 in set(_indexed_numbers(engine))
+    assert again.clean
+    assert _mark(engine) == dt.datetime(2026, 3, 1, tzinfo=dt.timezone.utc)
+
+
+def test_a_thread_sharing_the_high_water_second_is_not_dropped(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """``updated_at`` has one-second granularity, so the window overlaps by 60s."""
+    fake.add_issue(1, updated_at="2026-01-01T00:00:00Z")
+    _poll(engine, fake)
+
+    # Same second as the mark: a strictly-after resume would miss it entirely.
+    fake.add_issue(2, updated_at="2026-01-01T00:00:00Z")
+    result = _poll(engine, fake)
+
+    assert 2 in set(_indexed_numbers(engine))
+    assert result.indexed == 2, "re-reading #1 is free, and that is what buys the overlap"
+
+
+def test_a_capped_walk_still_makes_progress(engine: Engine, fake: FakeGitHub) -> None:
+    """GitHub refuses page 3; the pass indexes the prefix, bounds the mark, and the next
+    pass resumes from there. Three passes, no thread lost, nothing silent."""
+    fake.page_size = 1
+    fake.page_cap = 2
+    for n in range(1, 5):
+        fake.add_issue(n, updated_at=f"2026-0{n}-01T00:00:00Z")
+
+    # Each pass covers two pages, and the 60s overlap re-reads the boundary thread for
+    # free -- so four threads at two per pass takes three passes, not two.
+    first = _poll(engine, fake)
+    assert first.capped and not first.clean
+    assert _mark(engine) == dt.datetime(2026, 2, 1, tzinfo=dt.timezone.utc)
+
+    assert _poll(engine, fake).capped
+    assert _mark(engine) == dt.datetime(2026, 3, 1, tzinfo=dt.timezone.utc)
+
+    third = _poll(engine, fake)
+    assert third.capped is False, "the tail fits in one page, so the cap is not reached"
+    assert third.clean
+    assert _mark(engine) == dt.datetime(2026, 4, 1, tzinfo=dt.timezone.utc)
+    assert set(_indexed_numbers(engine)) == {1, 2, 3, 4}
+
+
+def test_a_capped_walk_does_not_let_a_newer_thread_drag_the_mark(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """The two list queries are ordered differently.
+
+    The uncapped review-comment walk can surface a thread far newer than anything the
+    capped issue walk reached. Indexing it is fine; letting it move the checkpoint over
+    the threads we never saw is how they vanish.
+    """
+    fake.page_size = 1
+    fake.page_cap = 1
+    for n in range(1, 4):
+        fake.add_issue(n, updated_at=f"2026-0{n}-01T00:00:00Z")
+    newer = fake.add_pr(9, updated_at="2026-12-01T00:00:00Z")
+    fake.add_review_comment(newer, 300, "inline", created_at="2026-12-01T00:00:00Z")
+
+    result = _poll(engine, fake)
+
+    assert result.capped
+    assert 9 in set(_indexed_numbers(engine)), "it is still indexed"
+    assert _mark(engine) == dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc), (
+        "but the mark stays behind the threads the capped walk never reached"
+    )
+
+
+def test_a_clean_pass_records_last_ok(engine: Engine, fake: FakeGitHub) -> None:
+    fake.add_issue(1, updated_at="2026-01-01T00:00:00Z")
+    _poll(engine, fake)
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(s.sync_state.c.last_run_at, s.sync_state.c.last_ok_at).where(
+                s.sync_state.c.repo == REPO
+            )
+        ).one()
+    assert row.last_run_at is not None
+    assert row.last_ok_at is not None
+
+
+def _indexed_numbers(engine: Engine) -> list[int]:
+    with engine.connect() as conn:
+        return [
+            r.github_number
+            for r in conn.execute(select(s.threads.c.github_number).order_by(s.threads.c.id))
+        ]

@@ -1,0 +1,139 @@
+# ghlore — chart defaults.
+#
+# This file is the *shape* of the configuration and safe defaults. It is NOT the
+# deployment's values: those live in the operator's own repository and are passed
+# with `-f`, because what is tracked here is a chart and what is tracked there is
+# an environment. Nothing in this file is a credential, and nothing in it should
+# become one — see `externalSecret` below.
+
+image:
+  repository: ghcr.io/huggingface/ghlore
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Required whenever the image is private, which it is here: `huggingface/ghlore` is
+# an *internal* repository, so its GHCR package is private and the kubelet gets a
+# 401 pulling it anonymously. The other services in this cluster need none of this
+# because their repositories -- and therefore their packages -- are public.
+#
+# Making the package public is not the shortcut it looks like: the image contains
+# the installed source, so a public image publishes internal code.
+imagePullSecrets: []
+
+# The Secret every workload reads via envFrom. Produced by the external-secret
+# operator (see below) or created by hand. Must carry GITHUB_TOKEN,
+# GHLORE_API_TOKENS and POSTGRES_PASSWORD.
+existingSecret: ghlore-secrets
+
+# ---------------------------------------------------------------------------
+# The database
+# ---------------------------------------------------------------------------
+postgres:
+  enabled: true
+  # pgvector, not plain postgres: migration 2 creates the `vector` extension.
+  # Nothing writes an embedding in v1 (section 6.1) — provisioning the column is
+  # what keeps the vector tier a later decision rather than a migration nobody
+  # can run.
+  image: pgvector/pgvector:pg16
+  user: ghlore
+  database: ghlore
+  persistence:
+    # "" = the cluster's default StorageClass (EBS gp3 on the open-source cluster).
+    storageClass: ""
+    # Sized for the corpus, and `raw_objects` dominates it: build plan section 4
+    # measures roughly 2–3 GB of JSONB for a large repository, and the derived
+    # tables are a fraction of that. 20Gi holds a full transformers history with
+    # room; a sample needs a tenth of it.
+    size: 20Gi
+  resources:
+    requests: {cpu: 250m, memory: 1Gi}
+    limits: {memory: 4Gi}
+
+# ---------------------------------------------------------------------------
+# The API and the section 8 web UI
+# ---------------------------------------------------------------------------
+serve:
+  # Read-only and stateless, so this may scale. It is 1 because the bottleneck is
+  # Postgres, not the process.
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+# ---------------------------------------------------------------------------
+# The poll loop — one Deployment per repository (section 5.2)
+# ---------------------------------------------------------------------------
+poll:
+  # Also the repository allowlist (section 11): an allowlist, never a denylist,
+  # because a denylist is one forgotten entry away from publishing private
+  # discussion into a public answer.
+  repos: []
+  interval: 5m
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 2Gi}
+
+# Section 6.2's bot-account list. `user.type == "Bot"` catches the accounts GitHub
+# knows are apps; these are the ones it does not. `HuggingFaceDocBuilderDev`
+# presents as `User` / `MEMBER`, so without listing it that account's boilerplate
+# is admissible evidence. A deployment that indexes its own agent's comments and
+# leaves this empty has reintroduced what section 11 refused.
+botAccounts: []
+
+# Section 8's relevance judgements, which section 15 calls the one thing only real
+# use can produce. A PVC rather than an emptyDir so a pod restart does not discard
+# what somebody spent an afternoon labelling.
+labels:
+  enabled: true
+  path: /var/lib/ghlore/labels.jsonl
+  storageClass: ""
+  size: 1Gi
+
+migrate:
+  backoffLimit: 3
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 512Mi}
+
+# ---------------------------------------------------------------------------
+# Backups
+# ---------------------------------------------------------------------------
+# Worth less than it looks and more than it looks, for different tables. The index
+# is derived: `derive` rebuilds it from `raw_objects` with no network, so losing it
+# costs CPU. `raw_objects` costs a day of API budget. `documents_history` (section
+# 14.1) cannot be re-fetched at any price — GitHub no longer serves the text.
+backups:
+  enabled: true
+  schedule: "0 3 * * *"
+  keep: 7
+  historyLimit: 3
+  storageClass: ""
+  size: 40Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+# ---------------------------------------------------------------------------
+# Ingress
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  host: ""
+  path: /
+  pathType: Prefix
+  className: ""
+  annotations: {}
+  tls: []
+
+# ---------------------------------------------------------------------------
+# Secrets, from whatever operator the environment runs
+# ---------------------------------------------------------------------------
+externalSecret:
+  enabled: false
+  name: ""
+  apiVersion: ""
+  kind: ""
+  spec: {}
+
+# Anything else the daemon reads from the environment.
+extraEnv: {}

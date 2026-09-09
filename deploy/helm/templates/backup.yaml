@@ -1,0 +1,87 @@
+{{- if .Values.backups.enabled }}
+#------------------------------------------------------------------------------
+# `pg_dump` to a PVC on a schedule.
+#
+# **What this is actually insuring against, because it changes how much it is
+# worth.** The index is *derived*: `raw_objects` holds every API payload verbatim
+# and `ghlored derive` rebuilds threads, documents and every signal table from it
+# with no network (build-plan section 5.0). So losing the volume costs a re-fetch,
+# not the corpus -- unless it also loses `raw_objects`, which is the expensive
+# part: a day of rate-limited API budget for a large repository.
+#
+# One thing here is genuinely irreplaceable and it is not the index:
+# `documents_history` (section 14.1). A superseded comment body cannot be
+# re-fetched at any price, because GitHub no longer serves it.
+#------------------------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "name" . }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.standard" . | nindent 4 }}
+    component: backup
+spec:
+  schedule: {{ .Values.backups.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.backups.historyLimit }}
+  failedJobsHistoryLimit: {{ .Values.backups.historyLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "labels.standard" . | nindent 12 }}
+            component: backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: "{{ .Values.postgres.image }}"
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+                  out="/backup/{{ .Values.postgres.database }}-${stamp}.dump"
+                  # Custom format: compressed, and restorable table by table, which
+                  # is what makes recovering `documents_history` alone possible.
+                  pg_dump -h {{ include "name" . }}-postgres -U {{ .Values.postgres.user }} \
+                    -d {{ .Values.postgres.database }} -Fc -f "$out"
+                  echo "wrote $out ($(du -h "$out" | cut -f1))"
+                  # Keep the most recent N and delete the rest. `ls -t` orders by
+                  # mtime, so this is oldest-first deletion without parsing names.
+                  ls -t /backup/*.dump 2>/dev/null | tail -n +{{ add .Values.backups.keep 1 }} | xargs -r rm -f
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.existingSecret }}
+                      key: POSTGRES_PASSWORD
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources: {{ toYaml .Values.backups.resources | nindent 16 }}
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ include "name" . }}-backup
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "name" . }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.standard" . | nindent 4 }}
+    component: backup
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.backups.storageClass }}
+  storageClassName: {{ .Values.backups.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backups.size | quote }}
+{{- end }}

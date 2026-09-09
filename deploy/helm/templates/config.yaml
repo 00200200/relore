@@ -1,0 +1,34 @@
+#------------------------------------------------------------------------------
+# Non-secret configuration. Everything here is safe to read in a manifest; the
+# credentials are in the Secret the external-secret operator produces.
+#------------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "name" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels: {{ include "labels.standard" . | nindent 4 }}
+data:
+  # Section 11: an allowlist, never a denylist, and re-checked per thread. A
+  # denylist would be one forgotten entry away from publishing private discussion
+  # into a public answer.
+  GHLORE_ALLOWED_REPOS: {{ join "," .Values.poll.repos | quote }}
+  # Section 6.2's bot-account list. `user.type == "Bot"` catches the accounts
+  # GitHub knows are apps; this catches the ones it does not --
+  # `HuggingFaceDocBuilderDev` presents as a `User` and a `MEMBER`, so without it
+  # that account's boilerplate is admissible evidence and takes result slots.
+  # Leaving it empty in a deployment that indexes its own agent's comments
+  # reintroduces exactly what section 11 refused.
+  #
+  # Changing it does not move existing documents on its own: `trust` is a
+  # DERIVED_COLUMN, so re-derive afterwards (`ghlored derive --repo <repo>`),
+  # which writes only the documents whose tier actually changed.
+  GHLORE_BOT_ACCOUNTS: {{ join "," .Values.botAccounts | quote }}
+  {{- if .Values.labels.enabled }}
+  # Section 8: relevance judgements append here, and section 15 calls
+  # human-judged ground truth the thing only real use can produce.
+  GHLORE_LABELS_PATH: {{ .Values.labels.path | quote }}
+  {{- end }}
+  {{- range $key, $value := .Values.extraEnv }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}

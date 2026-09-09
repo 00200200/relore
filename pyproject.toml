@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghlore"
+version = "0.0.0"
+description = "GitHub project memory: index a repository's issue/PR history and serve it to agents and humans"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+# The base install is the CLIENT. It must stay small enough to `pip install` inside a
+# constrained agent sandbox: no database driver, no parser, no ML stack.
+# See AGENTS.md, "The four invariants".
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+# The daemon. Never a base dependency -- see the build plan section 2.
+# SQLAlchemy Core (not the ORM) owns the portable half of the schema; SQLite needs no
+# driver, so `[server]` alone runs on a dev laptop and in the test suite.
+server = ["SQLAlchemy>=2.0", "fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.6"]
+# Production. SQLite is for tests and laptops only -- see AGENTS.md.
+postgres = ["ghlore[server]", "psycopg[binary]>=3.1"]
+# The code-lens engine. Ships no grammars.
+code = ["tree-sitter>=0.21"]
+# One extra per language. Adding a language must not touch core.
+python = ["ghlore[code]", "tree-sitter-python>=0.21"]
+dev = ["ghlore[postgres,python]", "pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+ghlore = "ghlore.cli:main"
+ghlored = "ghlore.daemon:main"
+
+[project.entry-points."ghlore.languages"]
+python = "ghlore.code.providers.python:PythonProvider"
+
+[tool.setuptools.packages.find]
+include = ["ghlore*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
