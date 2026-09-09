@@ -91,6 +91,10 @@ _PAGE = """
     font: .8rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
   }
   .note { color: var(--dim); font-size: .82rem; margin: .75rem 0; }
+  .needs-token { border: 1px solid var(--warn); border-radius: 4px; background: var(--card);
+                 padding: .6rem .75rem; margin: .75rem 0; font-size: .85rem; color: var(--fg); }
+  .needs-token b { color: var(--warn); }
+  #token.wanted { border-color: var(--warn); }
   h2.minor { font-size: .82rem; text-transform: uppercase; letter-spacing: .06em;
              color: var(--dim); margin: 2rem 0 .5rem; font-weight: 600; }
   /* The strip used to run its numbers together -- "3064 threads41857 documents".
@@ -119,6 +123,15 @@ _PAGE = """
 <main>
   <h1>ghlore <small id="backend">…</small></h1>
 
+  <!-- Shown only once the daemon has actually refused us. A page that opens by
+       demanding a token teaches nothing; a page that opens with a raw 401 JSON blob
+       teaches less. This appears when it is true, and says what to do about it. -->
+  <div class="needs-token" id="needs-token" hidden>
+    <b>This index requires a token.</b>
+    Paste one below to search. Ask whoever runs this daemon — it is one entry of
+    <code>GHLORE_API_TOKENS</code>, the part before the first <code>:</code>.
+  </div>
+
   <form id="search">
     <input name="q" placeholder="error text, a symbol, or a question" autofocus>
     <select name="kind">
@@ -138,7 +151,8 @@ _PAGE = """
     <button type="button" id="toggle-raw">view as the model sees it</button>
   </form>
   <div class="note">
-    <label>token <input id="token" size="24" placeholder="only if the daemon requires one"></label>
+    <label>token
+      <input id="token" size="24" placeholder="bearer token, if required"></label>
   </div>
 
   <!-- Everything below is for a first-time visitor. The tool assumed you already
@@ -153,6 +167,12 @@ _PAGE = """
          carries its own trust floor, because a report and a judgement are different
          claims.</p>
       <div class="samples" id="samples"></div>
+
+      <h3>Tokens</h3>
+      <p>Every endpoint that returns content is scoped to a bearer token, so a daemon
+         with tokens configured will refuse both the search and the health strip until
+         you paste one. A token is one entry of <code>GHLORE_API_TOKENS</code> — the
+         part before the first <code>:</code>. It is remembered in this browser only.</p>
 
       <h3>The CLI</h3>
       <p>The base install is a read-only HTTP client — no database driver, no parser —
@@ -201,6 +221,21 @@ const token = $("#token");
 token.value = localStorage.getItem("ghlore-token") || "";
 token.addEventListener("change", () => localStorage.setItem("ghlore-token", token.value));
 
+// A 401 is not an error to display, it is a question to ask. Everything else is
+// shown as whatever the server said, because those are real failures worth reading.
+const AUTH_HINT = "this index requires a token — paste one below";
+function readable(status, body) {
+  if (status === 401 || status === 403) return AUTH_HINT;
+  try {
+    const parsed = typeof body === "string" ? JSON.parse(body) : body;
+    return String(parsed.detail || parsed.message || body);
+  } catch (_) { return String(body); }
+}
+function wantToken(yes) {
+  $("#needs-token").hidden = !yes;
+  $("#token").classList.toggle("wanted", yes);
+}
+
 const headers = () => {
   const h = {"content-type": "application/json"};
   if (token.value.trim()) h["authorization"] = "Bearer " + token.value.trim();
@@ -219,7 +254,8 @@ $("#toggle-raw").addEventListener("click", () => {
 async function health() {
   try {
     const r = await fetch("/api/v1/status", {headers: headers()});
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) throw new Error(readable(r.status, await r.text()));
+    wantToken(false);
     const s = await r.json();
     $("#backend").textContent =
       s.backend.name + " / " + s.backend.ranking + " · v" + s.version;
@@ -236,7 +272,8 @@ async function health() {
       `<span><b>${n(s.raw_objects)}</b> staged</span>` +
       `<div class="passes">${passes}${sampled}</div>`;
   } catch (e) {
-    $("#health").innerHTML = `<span class="error">status unavailable: ${esc(e.message)}</span>`;
+    if (e.message === AUTH_HINT) wantToken(true);
+    $("#health").innerHTML = `<span class="error">index health: ${esc(e.message)}</span>`;
   }
 }
 
@@ -310,11 +347,13 @@ $("#search").addEventListener("submit", async (event) => {
       method: "POST", headers: headers(), body: JSON.stringify(body),
     });
     const payload = await r.json();
-    if (!r.ok) throw new Error(JSON.stringify(payload.detail || payload));
+    if (!r.ok) throw new Error(readable(r.status, payload));
+    wantToken(false);
     last = {payload, request: body};
     paint();
   } catch (e) {
     last = null;
+    if (e.message === AUTH_HINT) { wantToken(true); $("#token").focus(); }
     $("#hits").innerHTML = "";
     $("#message").innerHTML = `<span class="error">${esc(e.message)}</span>`;
   }
