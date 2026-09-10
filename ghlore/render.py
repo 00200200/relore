@@ -65,8 +65,10 @@ def _hit_lines(index: int, hit: dict[str, Any], *, compact: bool) -> list[str]:
     lines = [head, f"   {hit.get('title', '')}", f"   {hit.get('snippet', '')}"]
     if hit.get("url"):
         lines.append(f"   {hit['url']}")
-    if not compact and hit.get("score") is not None:
-        lines.append(f"   score {hit['score']}")
+    # No score. The ranking is already expressed by the order, and `score 0.03009` above
+    # `score 0.03125` supports no decision a caller can act on -- it is four tokens per
+    # hit spent on a number whose scale is a property of the backend. It stays in `--json`
+    # with its breakdown, for section 8's page and whoever is tuning the weights.
     lines.append("")
     return lines
 

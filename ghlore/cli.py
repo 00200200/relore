@@ -47,6 +47,26 @@ DEFAULT_API = "http://localhost:8080"
 _MILESTONE = {"precedent": 4, "why": 4, "map": 2, "defs": 2, "refs": 2}
 
 
+def _also_after_the_verb(parser: argparse.ArgumentParser, *flags: str) -> None:
+    """Accept a global flag after the subcommand as well as before it.
+
+    ``ghlore search ... --json`` is what anyone composing a command by analogy with
+    ``git`` and ``gh`` writes, and argparse's answer to it was ``unrecognized arguments:
+    --json`` -- which names the flag as unknown rather than misplaced, so the reader looks
+    for a typo instead of moving it. Accepting it in both positions is cheaper than
+    teaching every caller our own convention.
+
+    ``SUPPRESS`` is what makes the alias harmless: without it the subparser would write its
+    own default over a flag given *before* the verb, silently turning ``ghlore --json
+    search`` back off. Hidden from the subcommand's help, because it is already in the
+    program's.
+    """
+    for flag in flags:
+        parser.add_argument(
+            flag, action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ghlore", description=__doc__.splitlines()[0])
     p.add_argument("--version", action="version", version=f"ghlore {__version__}")
@@ -102,8 +122,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-expand",
         dest="expand",
         action="store_false",
-        help="ask exactly one question instead of section 6's fan-out over the legs",
+        help="ask exactly one question instead of fanning out over the query's parts",
     )
+    _also_after_the_verb(s, "--json", "--compact")
 
     t = sub.add_parser("thread", help="one thread, comments ranked by relevance")
     t.add_argument("number", type=int)
@@ -114,15 +135,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="serve the opening post whole instead of its first 800 characters",
     )
+    _also_after_the_verb(t, "--json", "--compact")
 
-    pr = sub.add_parser("precedent", help="completed units of work and what they consisted of")
+    pr = sub.add_parser(
+        "precedent",
+        help="(NOT IMPLEMENTED YET) completed units of work and what they consisted of",
+    )
     pr.add_argument("--kind")
     pr.add_argument("--file")
+    # Every other listing verb is limitable, so this one refusing `--limit` is a papercut
+    # rather than a decision.
+    pr.add_argument("--limit", type=int, default=5)
+    _also_after_the_verb(pr, "--json", "--compact")
 
-    w = sub.add_parser("why", help="review comments left on this line's code when it was written")
+    w = sub.add_parser(
+        "why",
+        help=("(NOT IMPLEMENTED YET) review comments left on this line's code when it was written"),
+    )
     w.add_argument("location", metavar="PATH:LINE")
+    _also_after_the_verb(w, "--json")
 
-    sub.add_parser("status", help="index freshness and coverage")
+    st = sub.add_parser("status", help="index freshness and coverage")
+    _also_after_the_verb(st, "--json")
 
     m = sub.add_parser(
         "map",
@@ -133,9 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     m.add_argument("--limit", type=int, default=40)
     m.add_argument("path", nargs="?", default=".")
+    _also_after_the_verb(m, "--json")
 
     d = sub.add_parser("defs", help="definitions in a local file (no server)")
     d.add_argument("path")
+    _also_after_the_verb(d, "--json")
 
     r = sub.add_parser(
         "refs",
@@ -145,6 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     r.add_argument("symbol")
+    _also_after_the_verb(r, "--json")
 
     return p
 
@@ -161,8 +198,9 @@ def main(argv: list[str] | None = None) -> int:
     }.get(args.verb)
     if handler is None:
         raise SystemExit(
-            f"ghlore {args.verb}: not implemented yet "
-            f"(milestone {_MILESTONE[args.verb]}, the build plan section 13)"
+            f"ghlore {args.verb}: not implemented yet. It is planned "
+            f"(milestone {_MILESTONE[args.verb]}) and `--help` marks it, so nothing else "
+            "in your plan depends on it."
         )
     try:
         return handler(args)

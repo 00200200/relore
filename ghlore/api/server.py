@@ -228,7 +228,7 @@ def build_app(
     def precedent(token: Caller) -> Response:
         return _json(
             {
-                "detail": "precedent is milestone 4 (the build plan section 13)",
+                "detail": "precedent is not implemented yet (planned, milestone 4)",
                 "precedents": [],
             },
             status=501,

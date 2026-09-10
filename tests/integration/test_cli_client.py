@@ -156,12 +156,16 @@ def test_json_output_is_the_api_response_and_carries_no_rendering(
     assert payload["notice"]
 
 
-def test_compact_drops_the_score_line(wired, engine, fake, capsys) -> None:
+def test_the_score_is_json_only(wired, engine, fake, capsys) -> None:
+    """The order already expresses the ranking, and the number's scale is a property of
+    the backend, so `score 0.03009` above `score 0.03125` supports no decision a caller
+    can act on. It stays in `--json` for section 8's page (huggingface/ghlore#13)."""
     fake.add_pr(1, body="findable wording")
     _index(engine, fake, 1)
 
-    assert "score" in _run(capsys, "search", "findable")
+    assert "score" not in _run(capsys, "search", "findable")
     assert "score" not in _run(capsys, "--compact", "search", "findable")
+    assert '"score"' in _run(capsys, "search", "findable", "--json")
 
 
 def test_thread_states_how_much_it_withheld(wired, engine, fake, capsys) -> None:
