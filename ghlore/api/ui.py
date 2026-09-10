@@ -235,7 +235,28 @@ const short = (iso) => iso ? String(iso).slice(0, 16).replace("T", " ") : "never
 
 const token = $("#token");
 token.value = localStorage.getItem("ghlore-token") || "";
-token.addEventListener("change", () => localStorage.setItem("ghlore-token", token.value));
+// The token input sits outside the search form on purpose -- it is not a query field --
+// so Enter in it triggers no implicit submit, and a refusal focuses it (see the 401
+// handler). Without the keydown below, the page answers a pasted token by doing nothing,
+// which reads as ignoring it. Committing one has to do the work explicitly: remember it,
+// re-check the daemon so the banner and the health strip stop saying it is missing, and
+// re-run the query that was refused.
+let applied = token.value;
+function applyToken() {
+  localStorage.setItem("ghlore-token", token.value);
+  applied = token.value;
+  health();
+  const f = $("#search");
+  if (f.q.value.trim()) f.requestSubmit();
+}
+// Blur commits a token only when it actually changed; Enter always retries, because
+// pressing it again is how someone asks for another attempt at the same value.
+token.addEventListener("change", () => { if (token.value !== applied) applyToken(); });
+token.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  applyToken();
+});
 
 // A 401 is not an error to display, it is a question to ask. Everything else is
 // shown as whatever the server said, because those are real failures worth reading.
