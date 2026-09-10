@@ -82,7 +82,7 @@ def prune_raw(
 
     Scoped to the object types the caller is *authoritative* for. A poll re-reads a
     thread's conversation and reviews, so it may prune those; it knows nothing about
-    ``pr_files``, which another pass stages against the same thread number, so it must
+    ``pr_details``, which another pass stages against the same thread number, so it must
     not touch them.
     """
     existing = {

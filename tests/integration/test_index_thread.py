@@ -409,13 +409,24 @@ def test_a_deleted_comment_is_pruned_from_raw_staging_too(engine: Engine, fake: 
 
 
 def test_pruning_leaves_other_passes_staging_alone(engine: Engine, fake: FakeGitHub) -> None:
-    """A poll knows nothing about ``pr_files``; the backfill's per-PR pass stages it
-    against the same thread number, and a poll must not delete it."""
+    """A poll knows nothing about ``pr_details``; the backfill's per-PR GraphQL pass stages
+    it against the same thread number, and a poll must not delete it. The authoritative set
+    is an allowlist for exactly this reason: a type a thread fetch does not name can never
+    be pruned by one. Staged through the real fetch, so this is the production object and
+    not a stand-in -- adding ``pr_details`` to a pruning path has to fail here."""
+    from fake_github import FakeGraphQL
+
+    from ghlore.github.graphql import fetch_pr_details
     from ghlore.store.dialect import utcnow
     from ghlore.store.repository import stage_raw
 
-    fake.add_pr(1)
+    pr = fake.add_pr(1)
+    pr.files = ["src/mod.py"]
     _index(engine, fake, 1)
+
+    graphql = FakeGraphQL(fake)
+    with graphql.client() as client:
+        details = fetch_pr_details(client, REPO, [1])
     with engine.begin() as conn:
         stage_raw(
             conn,
@@ -423,10 +434,10 @@ def test_pruning_leaves_other_passes_staging_alone(engine: Engine, fake: FakeGit
             [
                 {
                     "repo": REPO,
-                    "object_type": "pr_files",
+                    "object_type": "pr_details",
                     "object_id": "1",
                     "thread_number": 1,
-                    "payload": {"files": ["src/mod.py"]},
+                    "payload": details[1],
                     "fetched_at": utcnow(),
                     "github_updated_at": None,
                 }
@@ -437,7 +448,7 @@ def test_pruning_leaves_other_passes_staging_alone(engine: Engine, fake: FakeGit
 
     with engine.connect() as conn:
         kinds = conn.execute(
-            select(s.raw_objects.c.object_type).where(s.raw_objects.c.object_type == "pr_files")
+            select(s.raw_objects.c.object_type).where(s.raw_objects.c.object_type == "pr_details")
         ).all()
     assert len(kinds) == 1
 

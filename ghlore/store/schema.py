@@ -121,7 +121,7 @@ raw_objects = Table(
     "raw_objects",
     metadata,
     Column("repo", Text, primary_key=True),
-    # issue|pr|issue_comment|review|review_comment|pr_files
+    # issue|pr|issue_comment|review|review_comment|pr_details
     Column("object_type", Text, primary_key=True),
     Column("object_id", Text, primary_key=True),
     Column("thread_number", Integer),

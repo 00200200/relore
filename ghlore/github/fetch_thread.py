@@ -40,8 +40,9 @@ def strip_mirror_fields(payload: Any) -> Any:
     return out
 
 
-# The object types a thread fetch is authoritative for. Notably *not* `pr_files`, which
-# the backfill's per-PR pass stages against the same thread number.
+# The object types a thread fetch is authoritative for. Notably *not* `pr_details`,
+# which the backfill's per-PR pass stages against the same thread number. This is an
+# allowlist for exactly that reason: a type nobody here names can never be pruned.
 AUTHORITATIVE_TYPES = ("issue", "pr", "issue_comment", "review", "review_comment")
 
 
