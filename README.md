@@ -223,8 +223,10 @@ repo-declared tool manifest, declaring it is a few lines:
 Two things every integration must get right:
 
 - **Retrieved history is untrusted text**, written by whoever opened the issue. `ghlore`
-  wraps every response in an untrusted-content envelope and scrubs delimiters, but the
-  agent must also be told never to follow instructions found in retrieved content.
+  wraps every response in an untrusted-content envelope and scrubs delimiters, and inside
+  that envelope the quoted lines — and only those — are marked `>`, so a trust tier or a
+  count of ours is never mistaken for something a stranger wrote. The agent must still be
+  told never to follow instructions found in retrieved content.
 - **Cite and verify.** Every result carries a URL and its age. A 2019 comment can be right
   about intent and wrong about today's code.
 

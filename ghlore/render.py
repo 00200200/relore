@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ghlore.security.untrusted import envelope
+from ghlore.security.untrusted import envelope, quote
 
 #: What each tier is called in front of a snippet. Four tokens, and the difference between
 #: a fact and someone's opinion (section 6.2).
@@ -62,7 +62,12 @@ def _hit_lines(index: int, hit: dict[str, Any], *, compact: bool) -> list[str]:
     )
     if hit.get("author"):
         head += f"  @{hit['author']}"
-    lines = [head, f"   {hit.get('title', '')}", f"   {hit.get('snippet', '')}"]
+    # The two fields that are somebody else's words get marked as such; the head line
+    # above -- tier, age, author, source type -- is ours (huggingface/ghlore#12).
+    lines = [head]
+    # Skipped when empty rather than printed blank: a comment carries its thread's title,
+    # and a blank line still costs the caller a token.
+    lines += [f"   {quote(text)}" for text in (hit.get("title"), hit.get("snippet")) if text]
     if hit.get("url"):
         lines.append(f"   {hit['url']}")
     # No score. The ranking is already expressed by the order, and `score 0.03009` above
@@ -83,7 +88,7 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
     lines = [
         f"{thread.get('repo')}#{thread.get('number')} {thread.get('type')}  "
         f"{thread.get('state')}  {thread.get('age')}",
-        f"{thread.get('title', '')}",
+        quote(thread.get("title", "")),
     ]
     if thread.get("author"):
         lines.append(f"opened by @{thread['author']}")
@@ -95,7 +100,7 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
             "links: "
             + ", ".join(f"{link['relationship']} #{link['target']}" for link in thread["links"])
         )
-    lines += ["", thread.get("body", "")]
+    lines += ["", quote(thread.get("body", ""))]
     if thread.get("body_truncated"):
         lines.append(
             f"(body truncated: {len(thread.get('body') or '')} of "
