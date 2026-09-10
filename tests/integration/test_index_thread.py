@@ -516,3 +516,51 @@ def test_the_bot_list_is_case_insensitive_and_empty_by_default(
             select(s.documents.c.trust).where(s.documents.c.source_type == "issue_comment")
         ).scalar_one()
     assert trust == "reported"
+
+
+# -- a full re-derive ------------------------------------------------------
+
+
+def test_a_number_with_comments_but_no_thread_does_not_stop_a_full_rederive(
+    engine: Engine, fake: FakeGitHub, monkeypatch, capsys
+) -> None:
+    """A comment walk stages a comment under its thread number, and the thread can be
+    deleted or transferred upstream before the thread walk sees it — so a number can hold
+    comments and no issue. Measured in production: 20 of the 47,928 numbers staged for
+    `huggingface/transformers`, one of them 40 threads into the list.
+
+    `derive` keeps no cursor, so treating every staged number as derivable made the Job
+    die at the same number on every restart: a pass that restarts for ever and never
+    progresses, which is exactly what section 5.2 says to assert against.
+    """
+    from ghlore import daemon
+    from ghlore.ingest.timestamps import parse_timestamp
+    from ghlore.store import repository as repo_layer
+    from ghlore.store.dialect import utcnow
+
+    fake.add_issue(1, body="a real thread")
+    _index(engine, fake, 1)
+    with engine.begin() as conn:
+        repo_layer.stage_raw(
+            conn,
+            REPO,
+            [
+                {
+                    "repo": REPO,
+                    "object_type": "issue_comment",
+                    "object_id": "9001",
+                    "thread_number": 1998,  # nothing staged the issue itself
+                    "payload": {"id": 9001, "body": "orphaned by a transfer upstream"},
+                    "fetched_at": utcnow(),
+                    "github_updated_at": parse_timestamp("2026-01-01T00:00:00Z"),
+                }
+            ],
+        )
+
+    monkeypatch.setattr(daemon, "_engine", lambda: engine)
+    assert daemon.main(["derive", "--repo", REPO]) == 0
+
+    out = capsys.readouterr().out
+    assert "re-derived 1 threads" in out
+    # Reported, not silently dropped (build plan section 13.3 #10).
+    assert "skipped 1 numbers" in out and "ghlored sweep" in out

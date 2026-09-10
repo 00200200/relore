@@ -318,37 +318,72 @@ def _refresh_kw(refresh: object) -> dict[str, Any]:
 
 
 def _derive(args: argparse.Namespace) -> int:
-    from ghlore.ingest.index_thread import derive_thread
+    """Re-derive a repository, or the given numbers.
+
+    **The numbers to derive are the ones with a staged thread, not every number staged.**
+    A comment walk stages a comment under its thread number, and a thread can be deleted
+    or transferred upstream between that walk and the thread walk -- so a number can hold
+    comments and no issue. Collecting every staged number instead made a full re-derive
+    die on the first of them with `not staged; fetch it first`, and because nothing about
+    `derive` keeps a cursor, the retry died at the same number for ever: a Job that
+    restarts and never progresses, which is the shape section 5.2 warns about. Measured on
+    production: 20 such numbers out of 47,928, and one of them (`#1998`) is 40 threads
+    into the list.
+
+    `sweep` already treats this as expected and skips with a warning; this is the same
+    decision, plus the count, because a silent skip is the pattern section 13.3 #10 exists
+    to stop.
+    """
+    from ghlore.ingest.index_thread import THREAD_HEAD_TYPES, derive_thread
     from ghlore.store.schema import raw_objects
 
     engine = _engine()
-    numbers = args.number
+    numbers, orphans = args.number, 0
     if not numbers:
         with engine.connect() as conn:
-            numbers = sorted(
-                {
-                    int(n)
-                    for (n,) in conn.execute(
-                        select(raw_objects.c.thread_number.distinct()).where(
-                            raw_objects.c.repo == args.repo,
-                            raw_objects.c.thread_number.isnot(None),
-                        )
-                    )
-                }
-            )
+            staged = _staged_numbers(conn, args.repo, raw_objects)
+            heads = _staged_numbers(conn, args.repo, raw_objects, types=THREAD_HEAD_TYPES)
+        numbers = sorted(heads)
+        orphans = len(staged - heads)
     if not numbers:
         print(f"nothing staged for {args.repo}")
         return 0
-    wrote = signals = 0
+    wrote = signals = skipped = 0
     for number in numbers:
         with engine.begin() as conn:
-            result = derive_thread(conn, args.repo, number)
+            try:
+                result = derive_thread(conn, args.repo, number)
+            except LookupError:
+                # Only reachable when a head is pruned while this runs; the pre-filter
+                # above covers the ordinary case.
+                skipped += 1
+                continue
         wrote += result.wrote
         signals += result.signals.wrote
     # Two counters, because they answer different questions: a re-derive of unchanged
     # threads must write neither, and an extractor that improved writes only the second.
-    print(f"re-derived {len(numbers)} threads, {wrote} document writes, {signals} signal writes")
+    print(
+        f"re-derived {len(numbers) - skipped} threads, {wrote} document writes, "
+        f"{signals} signal writes"
+    )
+    if orphans or skipped:
+        print(
+            f"skipped {orphans + skipped} numbers with staged comments but no staged "
+            "issue or pull request (deleted or transferred upstream after the comment "
+            "walk saw them; `ghlored sweep` prunes them)"
+        )
     return 0
+
+
+def _staged_numbers(
+    conn: Any, repo: str, raw_objects: Any, *, types: tuple[str, ...] = ()
+) -> set[int]:
+    stmt = select(raw_objects.c.thread_number.distinct()).where(
+        raw_objects.c.repo == repo, raw_objects.c.thread_number.isnot(None)
+    )
+    if types:
+        stmt = stmt.where(raw_objects.c.object_type.in_(types))
+    return {int(n) for (n,) in conn.execute(stmt)}
 
 
 def _poll(args: argparse.Namespace) -> int:

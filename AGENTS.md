@@ -442,6 +442,16 @@ advancing past a failure skips that thread for ever while the pass looks healthy
 capped walk bounds how far the mark may move, because the uncapped second list query can
 surface a thread far newer than anything the capped one reached.
 
+**A full `ghlored derive` derives the threads that are *staged*, not every staged
+number.** A comment walk stages a comment under its thread number, and the thread can be
+deleted or transferred upstream before the thread walk sees it — so a number can hold
+comments and no issue. 20 of the 47,928 numbers staged for `huggingface/transformers` are
+that, one of them 40 threads into the list. Because `derive` keeps no cursor, collecting
+every staged number made the pass die at the same number on every restart: a Job that
+restarts for ever and never progresses, which is the shape the checkpoint rules above
+warn about. `sweep` already skipped these with a warning; `derive` now pre-filters on
+`THREAD_HEAD_TYPES` and **reports the count** rather than skipping quietly.
+
 **Two silent-success classes.** A run that stops early and exits 0 is the failure mode
 here. Assert: the high-water mark advances only per *committed* thread; killing a pass
 leaves the next pass re-covering the remainder; a thread sharing the high-water second is

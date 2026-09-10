@@ -30,6 +30,14 @@ from ghlore.store.dialect import utcnow
 
 log = logging.getLogger(__name__)
 
+#: The staged object types that *are* a thread. Everything else staged under a thread
+#: number is a child of one, and a number with only children cannot be derived at all --
+#: which is a real state, not a corruption: 20 of the 47,928 numbers staged for
+#: `huggingface/transformers` are comments whose issue was deleted or transferred upstream
+#: after the comment walk saw it. `ghlored derive` reads this to pick what it can derive
+#: and reports the rest; `ghlored sweep` is what prunes them.
+THREAD_HEAD_TYPES = ("issue", "pr")
+
 
 @dataclass
 class IndexResult:
