@@ -33,8 +33,17 @@ class TreeSitterProvider:
     grammar_module: str = ""
     #: Node types that introduce a definition, mapped to the ``kind`` reported for them.
     definition_nodes: dict[str, str] = {}
-    #: Node types that count as a reference to a name.
-    reference_nodes: tuple[str, ...] = ()
+    #: Node types that count as a reference, mapped to ``(kind, name_field)``: the kind
+    #: reported for it, and the field carrying the name when the node is not itself the
+    #: name. ``None`` means the node's own text. The field is resolved *recursively*, so a
+    #: call whose callee is an attribute chain reports the chain's last component -- the
+    #: name a reader would have written -- without core knowing what a chain is.
+    reference_nodes: dict[str, tuple[str, str | None]] = {}
+    #: Strongest reading first. Two node types routinely describe the same occurrence: a
+    #: call whose callee is an attribute is a ``call`` node and an ``attribute`` node over
+    #: the same bytes. The caller wants one row per occurrence, labelled with the most
+    #: specific of them.
+    reference_precedence: tuple[str, ...] = ()
 
     def __init__(self) -> None:
         self._parser = _parser_for(self.grammar_module)
@@ -83,19 +92,46 @@ class TreeSitterProvider:
             yield from self._walk(child, source, parents=(*parents, name))
 
     def _references(self, node: Any, source: bytes) -> Iterator[Reference]:
-        for child in node.children:
-            if child.type in self.reference_nodes:
-                name = self._reference_name(child, source)
-                if name:
-                    yield Reference(name=name, line=child.start_point[0] + 1)
-            yield from self._references(child, source)
+        """Every occurrence of a name, once, in source order, labelled with its kind.
+
+        Keyed on the *name's* byte span rather than on the node, because that is what
+        makes one occurrence one row however many node types describe it -- and it is what
+        lets a definition, an attribute read and a call all be reported without the caller
+        having to guess which of three rows is the same line twice.
+        """
+        rank = {kind: index for index, kind in enumerate(self.reference_precedence)}
+        found: dict[tuple[int, int], Reference] = {}
+        for child in _descendants(node):
+            entry = self.reference_nodes.get(child.type)
+            if entry is None:
+                continue
+            kind, field = entry
+            named = self._name_node(child, field)
+            if named is None:
+                continue
+            name = _text(named, source)
+            if not name:
+                continue
+            key = (named.start_byte, named.end_byte)
+            previous = found.get(key)
+            if previous is None or rank.get(kind, len(rank)) < rank.get(previous.kind, len(rank)):
+                found[key] = Reference(name=name, line=named.start_point[0] + 1, kind=kind)
+        for key in sorted(found):
+            yield found[key]
+
+    def _name_node(self, node: Any, field: str | None) -> Any | None:
+        """Follow ``name_field`` down to the node that carries the written name."""
+        if field is None:
+            return node
+        child = node.child_by_field_name(field)
+        if child is None:
+            return None
+        entry = self.reference_nodes.get(child.type)
+        return self._name_node(child, entry[1]) if entry else child
 
     def _name_of(self, node: Any, source: bytes) -> str:
         field = node.child_by_field_name("name")
         return _text(field, source) if field is not None else ""
-
-    def _reference_name(self, node: Any, source: bytes) -> str:
-        return _text(node, source)
 
     # -- the parts a language owns ---------------------------------------
 
@@ -110,6 +146,16 @@ class TreeSitterProvider:
 
     def kind_for(self, kind: str, parents: tuple[str, ...]) -> str:
         return kind
+
+
+def _descendants(node: Any) -> Iterator[Any]:
+    """The node and everything under it. Order is irrelevant: references are sorted by
+    their name's position on the way out."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        stack.extend(current.children)
 
 
 def _parser_for(module_name: str) -> Any:

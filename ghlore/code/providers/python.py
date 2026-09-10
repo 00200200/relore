@@ -15,10 +15,32 @@ class PythonProvider(TreeSitterProvider):
     patterns = ("*.py", "*.pyi")
     grammar_module = "tree_sitter_python"
     definition_nodes = {"class_definition": "class", "function_definition": "function"}
-    #: Names in a call position. Deliberately not every identifier: a reference graph that
-    #: counts every mention of ``self`` ranks nothing, and section 1's use for refs is
-    #: "who calls this".
-    reference_nodes = ("call",)
+    #: Every way a name is written, **labelled** -- not only names in a call position.
+    #:
+    #: Calls alone was a reasoned choice ("a graph that counts every mention of ``self``
+    #: ranks nothing"), and a measurement overturned it: ``refs
+    #: compute_default_rope_parameters`` returned 21 of ~400 occurrences in
+    #: ``huggingface/transformers`` and missed
+    #: ``rope_init_fn: Callable = self.compute_default_rope_parameters`` -- a value read
+    #: through an attribute rather than called, in the very file being debugged. A sweep
+    #: for "every affected call site" built on that under-reports by 95% and looks
+    #: complete. The ranking worry is answered by the ``kind`` rather than by omission:
+    #: core groups the counts, and ``map`` weighs a name against how many definitions
+    #: share it.
+    #:
+    #: The attribute chain in front of a name is still not resolved -- that is the
+    #: disambiguation tier and it needs a whole tree in scope -- so ``a.b.foo()`` reports
+    #: ``foo`` and the bare name is what matches. A definition is reported too, because
+    #: "which files define their own copy of this function" is what a repository that
+    #: duplicates model code is actually asked, and the kind says which rows those are.
+    reference_nodes = {
+        "call": ("call", "function"),
+        "attribute": ("attribute", "attribute"),
+        "function_definition": ("definition", "name"),
+        "class_definition": ("definition", "name"),
+        "identifier": ("name", None),
+    }
+    reference_precedence = ("call", "definition", "attribute", "name")
 
     def kind_for(self, kind: str, parents: tuple[str, ...]) -> str:
         """A function inside anything is a method, which is what a reader expects to see

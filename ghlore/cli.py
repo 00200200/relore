@@ -124,14 +124,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="index freshness and coverage")
 
-    m = sub.add_parser("map", help="ranked repo map of the local checkout (no server)")
+    m = sub.add_parser(
+        "map",
+        help=(
+            "ranked repo map of the local checkout: name matches per definition, dunders "
+            "excluded (no server)"
+        ),
+    )
     m.add_argument("--limit", type=int, default=40)
     m.add_argument("path", nargs="?", default=".")
 
     d = sub.add_parser("defs", help="definitions in a local file (no server)")
     d.add_argument("path")
 
-    r = sub.add_parser("refs", help="references to a symbol in the local checkout (no server)")
+    r = sub.add_parser(
+        "refs",
+        help=(
+            "every occurrence of a symbol in the local checkout, by kind: call, "
+            "definition, attribute, name (no server)"
+        ),
+    )
     r.add_argument("symbol")
 
     return p
@@ -247,6 +259,7 @@ def _map(args: argparse.Namespace) -> int:
                     "files": result.files,
                     "definitions": result.definitions,
                     "ranked_by": result.ranked_by,
+                    "excluded_dunders": result.excluded_dunders,
                     "entries": [vars(e) for e in result.entries],
                 },
                 indent=2,
@@ -256,10 +269,16 @@ def _map(args: argparse.Namespace) -> int:
     print(
         f"{result.definitions} definitions in {result.files} files, "
         f"top {len(result.entries)} by {result.ranked_by}"
+        + (f" ({result.excluded_dunders} dunders excluded)" if result.excluded_dunders else "")
+    )
+    print(
+        "  (a count of the written *name*: same-named definitions share it, so the "
+        "definition count is how much this row overstates)"
     )
     for entry in result.entries:
-        callers = f"{entry.callers} callers" if entry.callers else "-"
-        print(f"  {entry.qualname:44} {entry.kind:9} {callers:12} {entry.path}:{entry.line}")
+        shared = f"{entry.shared_by} definition" + ("s" if entry.shared_by > 1 else "")
+        weight = f"{entry.matches} matches / {shared}" if entry.matches else "-"
+        print(f"  {entry.qualname:44} {entry.kind:9} {weight:28} {entry.path}:{entry.line}")
     return 0
 
 
@@ -294,6 +313,7 @@ def _refs(args: argparse.Namespace) -> int:
                 {
                     "searched": result.searched,
                     "unsupported": list(result.unsupported),
+                    "by_kind": result.by_kind,
                     "hits": [vars(h) for h in result.hits],
                 },
                 indent=2,
@@ -301,8 +321,12 @@ def _refs(args: argparse.Namespace) -> int:
         )
         return 0
     for hit in result.hits:
-        print(f"{hit.path}:{hit.line}")
-    print(f"-- {len(result.hits)} references in {result.searched} files")
+        print(f"{hit.path}:{hit.line}  {hit.kind}")
+    counts = ", ".join(f"{count} {kind}" for kind, count in result.by_kind.items())
+    print(
+        f"-- {len(result.hits)} references in {result.searched} files"
+        + (f" ({counts})" if counts else "")
+    )
     if result.unsupported:
         # Section 9's rule 2: say so and exit 0, rather than return an empty list a caller
         # would read as "nothing calls this".

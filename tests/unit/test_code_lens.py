@@ -131,17 +131,36 @@ def test_definitions_come_back_in_source_order(python, monkeypatch) -> None:
 # -- refs ------------------------------------------------------------------
 
 
-def test_refs_finds_call_sites_across_a_tree(python, monkeypatch, tmp_path) -> None:
+def test_refs_reports_every_occurrence_with_its_kind(python, monkeypatch, tmp_path) -> None:
+    """Not only call sites. The measured failure was ``refs`` returning 21 of ~400
+    occurrences with nothing to say it had left 95% out."""
     _use(monkeypatch, python)
     (tmp_path / "a.py").write_bytes(SOURCE)
     (tmp_path / "b.py").write_bytes(b"from a import helper\n\ndef go():\n    return helper(1)\n")
 
     result = references(str(tmp_path), "helper")
 
-    assert {(h.line) for h in result.hits} == {4}
-    assert len(result.hits) == 2
+    assert result.by_kind == {"call": 2, "definition": 1, "name": 1}
     assert result.searched == 2
     assert result.complete
+
+
+def test_refs_finds_a_name_read_through_an_attribute(python, monkeypatch, tmp_path) -> None:
+    """The decisive case: ``self.compute_default_rope_parameters`` assigned rather than
+    called was absent from the output, in the file being debugged."""
+    _use(monkeypatch, python)
+    (tmp_path / "m.py").write_bytes(
+        b"class Rot:\n"
+        b"    def go(self):\n"
+        b"        self.rope_init_fn = self.compute_default_rope_parameters\n"
+        b"\n"
+        b"    def compute_default_rope_parameters(self):\n"
+        b"        pass\n"
+    )
+
+    result = references(str(tmp_path), "compute_default_rope_parameters")
+
+    assert [(h.line, h.kind) for h in result.hits] == [(3, "attribute"), (5, "definition")]
 
 
 def test_refs_names_the_providers_that_offer_no_reference_tier(monkeypatch, tmp_path) -> None:
@@ -171,7 +190,7 @@ def test_refs_does_not_split_a_qualname_to_match_it(python, monkeypatch, tmp_pat
 # -- the repo map ----------------------------------------------------------
 
 
-def test_the_map_ranks_by_how_much_of_the_tree_calls_a_name(python, monkeypatch, tmp_path) -> None:
+def test_the_map_ranks_by_how_much_of_the_tree_writes_a_name(python, monkeypatch, tmp_path) -> None:
     _use(monkeypatch, python)
     (tmp_path / "core.py").write_bytes(b"def busy():\n    pass\n\ndef quiet():\n    pass\n")
     for i in range(3):
@@ -179,10 +198,51 @@ def test_the_map_ranks_by_how_much_of_the_tree_calls_a_name(python, monkeypatch,
 
     result = repo_map(str(tmp_path), limit=10)
 
-    assert result.ranked_by == "callers"
+    assert result.ranked_by == "name matches per definition"
     assert result.entries[0].qualname == "busy"
-    assert result.entries[0].callers == 3
+    assert result.entries[0].matches == 6  # three imports and three calls
+    assert result.entries[0].shared_by == 1
     assert {e.qualname for e in result.entries} >= {"busy", "quiet"}
+
+
+def test_the_map_divides_a_count_shared_by_several_definitions(
+    python, monkeypatch, tmp_path
+) -> None:
+    """The failure this exists for: every ``.to`` in `huggingface/transformers` was
+    credited to five unrelated definitions, and 35 of the top 40 were ``__init__`` at an
+    identical count. A busy name defined once has to outrank a busier name defined many
+    times, or the map is a list of the language's most common method names."""
+    _use(monkeypatch, python)
+    (tmp_path / "shared.py").write_bytes(
+        b"class A:\n    def to(self):\n        pass\n\n"
+        b"class B:\n    def to(self):\n        pass\n\n"
+        b"def unique():\n    pass\n"
+    )
+    (tmp_path / "user.py").write_bytes(
+        b"def go(a):\n    a.to()\n    a.to()\n    a.to()\n    unique()\n    unique()\n"
+    )
+
+    result = repo_map(str(tmp_path), limit=10)
+
+    top = result.entries[0]
+    assert top.qualname == "unique"
+    assert (top.matches, top.shared_by) == (2, 1)
+    shared = [e for e in result.entries if e.qualname.endswith(".to")]
+    assert [(e.matches, e.shared_by) for e in shared] == [(3, 2), (3, 2)]
+
+
+def test_the_map_leaves_dunders_out_and_says_how_many(python, monkeypatch, tmp_path) -> None:
+    _use(monkeypatch, python)
+    (tmp_path / "m.py").write_bytes(
+        b"class A:\n    def __init__(self):\n        pass\n\n"
+        b"class B:\n    def __init__(self):\n        pass\n"
+    )
+
+    result = repo_map(str(tmp_path), limit=10)
+
+    assert result.definitions == 4
+    assert result.excluded_dunders == 2
+    assert all("__init__" not in e.qualname for e in result.entries)
 
 
 def test_the_map_says_when_nothing_supplied_a_reference_graph(monkeypatch, tmp_path) -> None:

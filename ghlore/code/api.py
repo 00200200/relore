@@ -52,9 +52,22 @@ class Definition:
 
 @dataclass(frozen=True)
 class Reference:
+    """One occurrence of a name.
+
+    ``kind`` is the honest half, and it is why ``refs`` can be trusted for a sweep. A
+    reference index that reports only call sites answers "find every affected site" with a
+    small fraction of them and no way to tell -- measured at 21 of ~400 for
+    ``compute_default_rope_parameters`` in ``huggingface/transformers``, missing the
+    ``self.compute_default_rope_parameters`` in the file being debugged, because a value
+    read through an attribute is not a call. So every occurrence is reported and *labelled*
+    instead: ``call``, ``definition``, ``attribute``, ``name``. The kinds a language has
+    are the provider's business (rule 1); core groups by them and prints the counts.
+    """
+
     name: str
     line: int
     qualname: str | None = None  # None when the provider cannot resolve the callee
+    kind: str = "reference"
 
 
 @dataclass(frozen=True)

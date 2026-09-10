@@ -21,6 +21,9 @@ class Hit:
     path: str
     line: int
     name: str
+    #: What the occurrence *is* -- ``call``, ``definition``, ``attribute``, ``name``. The
+    #: provider names its own kinds (rule 1); core groups by them and reports the counts.
+    kind: str = "reference"
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,19 @@ class RefResult:
     @property
     def complete(self) -> bool:
         return not self.unsupported
+
+    @property
+    def by_kind(self) -> dict[str, int]:
+        """How many of each kind, because a bare total is the thing that misled.
+
+        21 plausible-looking lines with no denominator and no statement of what was left
+        out reads as the whole truth; ``21 call, 38 definition, 214 attribute`` is a
+        number a caller can act on -- and can compare against ``grep``.
+        """
+        counts: dict[str, int] = {}
+        for hit in self.hits:
+            counts[hit.kind] = counts.get(hit.kind, 0) + 1
+        return dict(sorted(counts.items()))
 
 
 def references(root: str, symbol: str) -> RefResult:
@@ -78,4 +94,4 @@ def _matches(provider, path: str, source: bytes, symbol: str) -> Iterator[Hit]:
     """
     for reference in provider.refs(path, source):
         if symbol in (reference.name, reference.qualname):
-            yield Hit(path=path, line=reference.line, name=reference.name)
+            yield Hit(path=path, line=reference.line, name=reference.name, kind=reference.kind)
