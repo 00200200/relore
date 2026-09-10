@@ -2,7 +2,8 @@
 
 Two verb families, deliberately in one binary:
 
-* **history verbs** (``search``, ``thread``, ``precedent``, ``why``, ``status``) talk to a
+* **history verbs** (``search``, ``thread``, ``inflight``, ``precedent``, ``why``,
+  ``status``) talk to a
   ``ghlored`` over HTTP. They need ``GHLORE_API`` and, if that daemon requires one, a
   token in ``GHLORE_TOKEN``.
 * **code verbs** (``map``, ``defs``, ``refs``) run locally against the working tree and
@@ -30,7 +31,7 @@ from typing import Any
 
 from ghlore import __version__
 from ghlore.code.api import MissingParser
-from ghlore.render import render_search, render_status, render_thread
+from ghlore.render import render_inflight, render_search, render_status, render_thread
 
 API_ENV = "GHLORE_API"
 TOKEN_ENVS = ("GHLORE_TOKEN", "GHLORE_API_TOKEN")
@@ -137,6 +138,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _also_after_the_verb(t, "--json", "--compact")
 
+    inflight = sub.add_parser(
+        "inflight",
+        help="open pull requests that already claim to close this issue",
+    )
+    inflight.add_argument("number", type=int)
+    inflight.add_argument("--repo", help="OWNER/NAME; needed when the token can see several")
+    _also_after_the_verb(inflight, "--json")
+
     pr = sub.add_parser(
         "precedent",
         help="(NOT IMPLEMENTED YET) completed units of work and what they consisted of",
@@ -191,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     handler = {
         "search": _search,
         "thread": _thread,
+        "inflight": _inflight,
         "status": _status,
         "map": _map,
         "defs": _defs,
@@ -262,6 +272,19 @@ def _thread(args: argparse.Namespace) -> int:
         payload,
         lambda: payload.get("rendered") or render_thread(payload, compact=args.compact),
     )
+
+
+def _inflight(args: argparse.Namespace) -> int:
+    """Before diagnosing, ask whether somebody is already fixing it.
+
+    Cheap, one hop, and it prevents the most expensive mistake an agent makes -- see
+    :mod:`ghlore.ingest.relationships`.
+    """
+    query = {"render": str(not args.json).lower()}
+    if args.repo:
+        query["repo"] = args.repo
+    payload = _call(args, "GET", f"/api/v1/inflight/{args.number}", params=query)
+    return _emit(args, payload, lambda: payload.get("rendered") or render_inflight(payload))
 
 
 def _status(args: argparse.Namespace) -> int:

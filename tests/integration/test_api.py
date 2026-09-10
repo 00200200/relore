@@ -290,6 +290,37 @@ def test_a_bare_number_is_refused_when_the_scope_is_ambiguous(engine: Engine) ->
     assert "a/b" in json.dumps(response.json())
 
 
+# -- what is already being worked on ---------------------------------------
+
+
+def test_inflight_answers_for_a_number_the_index_has_never_seen(
+    client: TestClient, engine: Engine, fake
+) -> None:
+    """No 404: "nothing claims to close #999" is true and useful whether or not #999 is
+    indexed, and refusing it would make the unindexed case look like an error."""
+    fake.add_pr(1, body="Fixes #999")
+    _index(engine, fake, 1)
+
+    body = client.get("/api/v1/inflight/999").json()
+
+    assert [claim["number"] for claim in body["claims"]] == [1]
+    assert body["claims_total"] == 1
+    assert body["links_indexed"] == 1
+
+    empty = client.get("/api/v1/inflight/4242").json()
+    assert empty["claims"] == [] and empty["links_indexed"] == 1
+
+
+def test_inflight_outside_the_scope_is_404_not_403(engine: Engine, fake) -> None:
+    fake.add_pr(1, body="Fixes #2")
+    _index(engine, fake, 1)
+    auth = Authenticator(tokens=(Token("t", "secret", repos=("a/b", "c/d")),))
+    client = TestClient(build_app(engine, auth=auth))
+    client.headers["authorization"] = "Bearer secret"
+
+    assert client.get(f"/api/v1/inflight/2?repo={REPO}").status_code == 404
+
+
 # -- caps ------------------------------------------------------------------
 
 

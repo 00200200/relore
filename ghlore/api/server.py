@@ -33,9 +33,15 @@ from sqlalchemy import Engine, select
 
 from ghlore import __version__
 from ghlore.api import ui
-from ghlore.api.schemas import LabelRequest, SearchRequest, hit_json, thread_json
+from ghlore.api.schemas import (
+    LabelRequest,
+    SearchRequest,
+    hit_json,
+    inflight_json,
+    thread_json,
+)
 from ghlore.api.tokens import LABEL_SCOPE, Authenticator, AuthError, RateLimited, Token
-from ghlore.render import render_search, render_thread
+from ghlore.render import render_inflight, render_search, render_thread
 from ghlore.search import QueryError, SearchQuery, expand, open_backend, search_expanded
 from ghlore.search.queries import HUMAN_TRUST, admissible_trust
 from ghlore.security.untrusted import NOTICE, scrub_tree
@@ -191,6 +197,25 @@ def build_app(
             else None,
         )
 
+    def _one_repo(token: Caller, repo: str | None) -> str:
+        """The repository a bare number refers to.
+
+        Optional only while a token's scope holds exactly one repository -- with several, a
+        bare number is ambiguous and guessing would silently answer about the wrong
+        project. A repository outside the scope is a 404 rather than a 403: whether it
+        exists is not this token's business.
+        """
+        repos = token.scope(deps.indexed_repos())
+        if repo is None:
+            if len(repos) != 1:
+                raise HTTPException(
+                    status_code=400, detail=f"pass repo=: this token can see {list(repos)}"
+                )
+            return repos[0]
+        if repo not in repos:
+            raise HTTPException(status_code=404, detail=f"{repo} not found")
+        return repo
+
     @app.get("/api/v1/thread/{number}")
     def thread(
         number: int,
@@ -201,20 +226,8 @@ def build_app(
         render: bool = False,
         full: bool = False,
     ) -> Response:
-        """One thread, capped (section 6). ``repo`` is optional only while a token's scope
-        holds exactly one repository -- with several, a bare number is ambiguous and
-        guessing would silently answer about the wrong project."""
-        repos = token.scope(deps.indexed_repos())
-        if repo is None:
-            if len(repos) != 1:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"pass repo=: this token can see {list(repos)}",
-                )
-            repo = repos[0]
-        if repo not in repos:
-            # 404, not 403: whether a repository exists is not this token's business.
-            raise HTTPException(status_code=404, detail=f"{repo}#{number} not found")
+        """One thread, capped (section 6). See :func:`_one_repo` for ``repo``."""
+        repo = _one_repo(token, repo)
         view = deps.backend.thread(repo, number, focus=focus, full=full)
         if view is None:
             raise HTTPException(status_code=404, detail=f"{repo}#{number} not found")
@@ -223,6 +236,24 @@ def build_app(
             payload,
             render=(lambda scrubbed: render_thread(scrubbed, compact=compact)) if render else None,
         )
+
+    @app.get("/api/v1/inflight/{number}")
+    def inflight(
+        number: int,
+        token: Caller,
+        repo: str | None = None,
+        render: bool = False,
+    ) -> Response:
+        """What already claims to close this thread (section 13.3).
+
+        No 404 for a number this index has never seen: "nothing claims to close #48630" is
+        a true and useful answer whether or not #48630 is indexed, and refusing it would
+        make the *unindexed* case indistinguishable from an error.
+        """
+        repo = _one_repo(token, repo)
+        view = deps.backend.inflight(repo, number)
+        payload = {"notice": NOTICE, **inflight_json(view)}
+        return _json(payload, render=render_inflight if render else None)
 
     @app.post("/api/v1/precedent")
     def precedent(token: Caller) -> Response:

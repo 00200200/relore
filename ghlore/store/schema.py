@@ -169,29 +169,42 @@ thread_commits = Table(
     Column("sha", Text, nullable=False),
     Column("message", Text),
 )
+# The relationship edge (section 5.3, section 13.3): "this pull request claims to close
+# #N". Two columns for the target, and that is the whole design decision:
+#
+# * ``target_number`` is what the *source* thread says, so the edge is derivable from that
+#   thread alone -- which means the poll path fills it and it stays current. The plan had
+#   a not-null foreign key on both ends, which made an edge unstorable until its target
+#   was indexed and therefore made a corpus-wide pass a prerequisite for the *query*.
+# * ``target_thread_id`` is the resolution, filled when the target is in the index. It is
+#   nullable because the claim is a fact about the source and the resolution is not: an
+#   agent asking "is someone already fixing #48630?" is answered by the number, and only
+#   ranking (section 6's ``w_rel``) needs the join.
+#
+# The plan's ``metadata jsonb`` is not here: there is nothing to put in it, and a column
+# nothing writes is the mistake section 5.3 declines for keywords.
 thread_links = Table(
     "thread_links",
     metadata,
+    _fk("threads.id"),
+    Column("relationship", Text, nullable=False),  # closes | ...
+    Column("target_number", Integer, nullable=False),
     Column(
-        "source_thread_id",
-        pk_type(),
-        ForeignKey("threads.id", ondelete="CASCADE"),
-        nullable=False,
-    ),
-    Column("relationship", Text, nullable=False),
-    Column(
-        "target_thread_id",
-        pk_type(),
-        ForeignKey("threads.id", ondelete="CASCADE"),
-        nullable=False,
-    ),
-    Column("metadata", json_type(), nullable=False),
-    UniqueConstraint(
-        "source_thread_id", "relationship", "target_thread_id", name="thread_links_uq"
+        "target_thread_id", pk_type(), ForeignKey("threads.id", ondelete="CASCADE"), nullable=True
     ),
 )
-for _t in (thread_files, thread_symbols, thread_errors, thread_tests, thread_commits):
+for _t in (
+    thread_files,
+    thread_symbols,
+    thread_errors,
+    thread_tests,
+    thread_commits,
+    thread_links,
+):
     Index(f"{_t.name}_thread_idx", _t.c.thread_id)
+# The reverse direction is the one an agent asks for: "which threads claim to close this
+# number" (`ghlore inflight`).
+Index("thread_links_target_idx", thread_links.c.target_number)
 
 # The rename chain (section 1), derived from git history rather than any API payload.
 path_aliases = Table(

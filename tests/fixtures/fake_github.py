@@ -45,6 +45,9 @@ class FakeThread:
     # per-PR pass. Per thread rather than fixed, because "who merged this" is the whole
     # signal.
     merged_by: str = "maintainer"
+    #: Issue numbers GitHub itself resolved from this PR's closing keywords (section 13.3).
+    #: Served with their repository, because the real field can point at another one.
+    closing_references: list[int] = field(default_factory=list)
 
     @property
     def is_pr(self) -> bool:
@@ -364,7 +367,12 @@ class FakeGraphQL:
                         for sha, head in thread.commits
                     ],
                 },
-                "closingIssuesReferences": {"nodes": []},
+                "closingIssuesReferences": {
+                    "nodes": [
+                        {"number": n, "repository": {"nameWithOwner": self.fake.repo}}
+                        for n in thread.closing_references
+                    ]
+                },
             }
         return _json(200, {"data": {"rateLimit": self.rate_limit, "repository": repository}})
 

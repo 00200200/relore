@@ -164,7 +164,9 @@ ghlore search "poll wedged" --repo owner/name        # narrow the token's scope
 ghlore search "flaky teardown" --sort newest         # same hits, most recent first
 ghlore search "$(cat failure.txt)"                   # a whole traceback is one call
 ghlore search "optional mask dtype" --no-expand      # ask exactly one question
-ghlore thread 12345 --focus "optional mask"
+ghlore thread 12345 --focus "optional mask"     # orders the comments; never empties them
+ghlore thread 12345 --full                      # the opening post whole, repro included
+ghlore inflight 12345                 # is somebody already fixing this? ask before starting
 ghlore status                         # counts, freshness, and which search backend answered
 ghlore map --limit 40                 # ranked repo map, no server needed
 ghlore defs src/models/foo.py

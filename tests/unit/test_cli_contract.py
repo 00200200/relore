@@ -46,7 +46,8 @@ def test_code_verbs_without_a_parser_give_an_install_hint(monkeypatch, tmp_path,
 
 
 @pytest.mark.parametrize(
-    "verb", ["search", "thread", "precedent", "why", "status", "map", "defs", "refs"]
+    "verb",
+    ["search", "thread", "inflight", "precedent", "why", "status", "map", "defs", "refs"],
 )
 def test_every_documented_verb_is_registered(verb: str) -> None:
     actions = [a for a in cli.build_parser()._actions if hasattr(a, "choices") and a.choices]

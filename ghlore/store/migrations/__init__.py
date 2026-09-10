@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy import Connection, Engine, insert, select, text
+from sqlalchemy import Connection, Engine, func, insert, select, text
 
 from ghlore.store.dialect import utcnow
 from ghlore.store.schema import (
@@ -20,6 +20,7 @@ from ghlore.store.schema import (
     metadata,
     repo_sample,
     schema_migrations,
+    thread_links,
 )
 
 log = logging.getLogger(__name__)
@@ -171,12 +172,38 @@ def _document_history(conn: Connection) -> None:
     documents_history.create(bind=conn, checkfirst=True)
 
 
+def _link_claims(conn: Connection) -> None:
+    """``thread_links`` reshaped for section 13.3: a claim, plus its resolution.
+
+    The old shape had a not-null foreign key on both ends, which is why nothing ever wrote
+    it -- an edge was unstorable until its target thread was indexed, so the whole corpus
+    pass had to exist before a single edge did. The new shape carries ``target_number``
+    (known from the source thread alone) and a nullable ``target_thread_id``.
+
+    **Recreated rather than altered**, because the table is empty by construction on every
+    database that exists: nothing has ever populated it. SQLite cannot drop a NOT NULL
+    without rewriting the table anyway. Rows here would mean a version of this code nobody
+    has shipped, so the count is checked and a surprise refuses the migration rather than
+    dropping somebody's data.
+    """
+    if conn.dialect.has_table(conn, "thread_links"):
+        rows = conn.execute(select(func.count()).select_from(thread_links)).scalar_one()
+        if rows:
+            raise RuntimeError(
+                f"thread_links holds {rows} rows; this step recreates the table and would "
+                "drop them. Nothing in any shipped version writes it, so migrate by hand."
+            )
+        thread_links.drop(bind=conn)
+    thread_links.create(bind=conn)
+
+
 MIGRATIONS: tuple[tuple[int, str, Callable[[Connection], None]], ...] = (
     (1, "portable_core", _portable_core),
     (2, "postgres_search_layer", _postgres_search_layer),
     (3, "sqlite_search_layer", _sqlite_search_layer),
     (4, "sampled_floor", _sampled_floor),
     (5, "document_history", _document_history),
+    (6, "link_claims", _link_claims),
 )
 
 

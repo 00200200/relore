@@ -10,7 +10,7 @@ caveat that exists only in ``--json`` is a caveat the CLI's callers do not have.
 
 from __future__ import annotations
 
-from ghlore.render import render_search, render_thread
+from ghlore.render import render_inflight, render_search, render_thread
 
 
 def _thread(**fields):
@@ -156,3 +156,49 @@ def test_the_envelope_header_explains_the_marker() -> None:
 
     assert "Lines marked `>`" in out
     assert "Unmarked lines are ghlore's own" in out
+
+
+# -- is somebody already fixing this --------------------------------------
+
+
+def test_inflight_says_which_pull_request_and_what_state_it_is_in() -> None:
+    out = render_inflight(
+        {
+            "repo": "owner/name",
+            "number": 48630,
+            "claims": [
+                {
+                    "repo": "owner/name",
+                    "number": 48672,
+                    "type": "pr",
+                    "title": "fix: respect partial_rotary_factor",
+                    "author": "blipbyte",
+                    "state": "open",
+                    "draft": True,
+                    "merged": False,
+                    "age": "8h",
+                    "relationship": "closes",
+                }
+            ],
+            "claims_returned": 1,
+            "claims_total": 1,
+            "links_indexed": 12,
+        }
+    )
+
+    assert "1 thread claims to close owner/name#48630" in out
+    assert "open draft" in out  # a stale draft and an approved PR imply opposite actions
+    assert "> fix: respect partial_rotary_factor" in out
+
+
+def test_inflight_distinguishes_a_clean_answer_from_an_unanswerable_one() -> None:
+    """ "Nobody is working on this" and "this index cannot tell you" are opposite
+    instructions, and both come back as an empty list."""
+    clean = render_inflight({"repo": "owner/name", "number": 1, "claims": [], "links_indexed": 12})
+    unanswerable = render_inflight(
+        {"repo": "owner/name", "number": 1, "claims": [], "links_indexed": 0}
+    )
+
+    assert "nothing in the index claims to close" in clean
+    assert "no relationship rows" not in clean
+    assert "no relationship rows" in unanswerable

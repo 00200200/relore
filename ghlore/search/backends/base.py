@@ -41,10 +41,13 @@ from sqlalchemy import (
 from ghlore.search.queries import (
     HUMAN_TRUST,
     MAX_BODY_CHARS,
+    MAX_CLAIMS,
     MAX_HITS_PER_THREAD,
     MAX_THREAD_COMMENTS,
     BackendInfo,
+    Claim,
     Hit,
+    InflightView,
     SearchQuery,
     ThreadView,
     admissible_trust,
@@ -432,16 +435,19 @@ class SearchBackend(ABC):
                     .order_by(s.thread_files.c.path)
                 )
             )
+            # No join: the target *number* is the claim (section 13.3), and joining to
+            # `threads` would drop exactly the edges worth reporting -- a pull request
+            # closing an issue this index has never seen.
             links = tuple(
-                {"relationship": rel, "target": int(target)}
-                for rel, target in conn.execute(
-                    select(s.thread_links.c.relationship, s.threads.c.github_number)
-                    .select_from(
-                        s.thread_links.join(
-                            s.threads, s.thread_links.c.target_thread_id == s.threads.c.id
-                        )
+                {"relationship": rel, "target": int(target), "indexed": resolved is not None}
+                for rel, target, resolved in conn.execute(
+                    select(
+                        s.thread_links.c.relationship,
+                        s.thread_links.c.target_number,
+                        s.thread_links.c.target_thread_id,
                     )
-                    .where(s.thread_links.c.source_thread_id == row.id)
+                    .where(s.thread_links.c.thread_id == row.id)
+                    .order_by(s.thread_links.c.target_number)
                 )
             )
             collected = int(
@@ -479,6 +485,76 @@ class SearchBackend(ABC):
             total_documents=total,
             focus=focus,
             focus_matched=matched,
+        )
+
+    # -- what is already being worked on ---------------------------------
+
+    def inflight(self, repo: str, number: int) -> InflightView:
+        """Which threads claim to close ``number``.
+
+        The most expensive mistake an agent makes is writing a patch for something already
+        in review, and it is preventable in one hop: this walks section 13.3's edges
+        backwards. Ordered open first and then by recency, because a stale draft and an
+        approved pull request imply opposite next actions.
+
+        **No trust floor, deliberately.** This reads `threads`, not `documents`, so
+        section 6.2's machine exclusion does not apply -- and it should not: the
+        deployment's own bot having an open fix pull request is precisely the duplicate an
+        agent must not create. Excluding a document as evidence and hiding a pull request
+        as *work in progress* are different questions.
+        """
+        newest = nulls_last(s.threads.c.updated_at.desc())
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    s.threads.c.repo,
+                    s.threads.c.github_number,
+                    s.threads.c.thread_type,
+                    s.threads.c.title,
+                    s.threads.c.url,
+                    s.threads.c.author,
+                    s.threads.c.state,
+                    s.threads.c.merged_at,
+                    s.threads.c.created_at,
+                    s.threads.c.metadata,
+                    s.thread_links.c.relationship,
+                )
+                .select_from(
+                    s.thread_links.join(s.threads, s.thread_links.c.thread_id == s.threads.c.id)
+                )
+                .where(s.threads.c.repo == repo, s.thread_links.c.target_number == number)
+                .order_by(case((s.threads.c.state == "open", 0), else_=1), newest)
+            ).all()
+            indexed = int(
+                conn.execute(
+                    select(func.count())
+                    .select_from(
+                        s.thread_links.join(s.threads, s.thread_links.c.thread_id == s.threads.c.id)
+                    )
+                    .where(s.threads.c.repo == repo)
+                ).scalar_one()
+                or 0
+            )
+
+        claims = tuple(
+            Claim(
+                repo=row.repo,
+                number=int(row.github_number),
+                thread_type=row.thread_type,
+                title=row.title,
+                url=row.url,
+                author=row.author,
+                state=row.state,
+                # Indexed, not `row.metadata`: `Row` shadows it.
+                draft=bool((row._mapping["metadata"] or {}).get("draft")),
+                merged=row.merged_at is not None,
+                age=render_age(row.created_at),
+                relationship=row.relationship,
+            )
+            for row in rows[:MAX_CLAIMS]
+        )
+        return InflightView(
+            repo=repo, number=number, claims=claims, total=len(rows), links_indexed=indexed
         )
 
     def _body(self, conn: Any, thread_id: int, *, full: bool) -> tuple[str, int]:

@@ -40,6 +40,9 @@ MAX_HITS_PER_THREAD = 3
 #: opening is reliably worth reading.
 MAX_THREAD_COMMENTS = 10
 MAX_BODY_CHARS = 800
+#: ``inflight`` answers "is somebody already fixing this?", and the useful answer is one
+#: pull request. Ten is the same cap as a result page for the same reason.
+MAX_CLAIMS = 10
 
 #: The query kinds of section 6's decay table and section 6.2's trust table. The per-kind
 #: **trust floor** is applied (see :func:`trust_policy`); kind-aware **decay** is not, and
@@ -197,6 +200,44 @@ class ThreadView:
     #: nothing, so this is the thread in order".
     focus: str = ""
     focus_matched: int | None = None
+
+
+@dataclass(frozen=True)
+class Claim:
+    """One thread that claims to close another (section 13.3).
+
+    ``state``, ``draft`` and ``merged`` are all here because they imply opposite next
+    actions: an approved pull request means stop, a stale draft means supersede it, and a
+    merged one means the fix is in and the issue may simply be un-closed.
+    """
+
+    repo: str
+    number: int
+    thread_type: str
+    title: str
+    url: str | None
+    author: str | None
+    state: str | None
+    draft: bool
+    merged: bool
+    age: str
+    relationship: str
+
+
+@dataclass(frozen=True)
+class InflightView:
+    """What claims to close one thread, and whether the question could be answered.
+
+    ``links_indexed`` is the difference between "nothing claims this" and "this index has
+    no relationship rows at all" -- an index derived before section 13.3 existed answers
+    every ``inflight`` with silence, and silence here is the answer an agent acts on.
+    """
+
+    repo: str
+    number: int
+    claims: tuple[Claim, ...]
+    total: int
+    links_indexed: int
 
 
 @dataclass(frozen=True)

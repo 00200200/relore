@@ -99,10 +99,7 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
         lines.append(f"labels: {', '.join(thread['labels'])}")
     lines += _file_lines(thread)
     if thread.get("links"):
-        lines.append(
-            "links: "
-            + ", ".join(f"{link['relationship']} #{link['target']}" for link in thread["links"])
-        )
+        lines.append("links: " + ", ".join(_link(link) for link in thread["links"]))
     lines += ["", quote(thread.get("body", ""))]
     if thread.get("body_truncated"):
         lines.append(
@@ -129,6 +126,14 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
             + ")"
         )
     return envelope("\n".join(lines).rstrip(), source=thread.get("url"))
+
+
+def _link(link: dict[str, Any]) -> str:
+    """One relationship edge. ``indexed`` is on the page because an unresolved target is
+    the normal case on a sampled index, and "we have not indexed #12" is a different fact
+    from "#12 does not exist"."""
+    suffix = "" if link.get("indexed", True) else " (not indexed)"
+    return f"{link['relationship']} #{link['target']}{suffix}"
 
 
 def _file_lines(thread: dict[str, Any]) -> list[str]:
@@ -166,6 +171,55 @@ def _file_lines(thread: dict[str, Any]) -> list[str]:
     if files:
         lines.append("  " + ", ".join(files))
     return lines
+
+
+def render_inflight(payload: dict[str, Any]) -> str:
+    """What already claims to close a thread.
+
+    Empty is the answer this verb exists to give, so it has to be a sentence rather than a
+    blank page -- and it has to be distinguishable from *unanswerable*: an index with no
+    relationship rows at all says so, because "nobody is working on this" and "this index
+    cannot tell you" imply opposite next actions.
+    """
+    claims = payload.get("claims") or []
+    subject = f"{payload.get('repo')}#{payload.get('number')}"
+    total = payload.get("claims_total", len(claims))
+    if not claims:
+        lines = [f"nothing in the index claims to close {subject}."]
+        if not payload.get("links_indexed"):
+            lines.append(
+                "(and this repository has no relationship rows at all, so that is not an "
+                "answer yet: re-derive it with `ghlored derive` to fill them.)"
+            )
+        return envelope("\n".join(lines))
+
+    claim_word = "thread claims" if total == 1 else "threads claim"
+    lines = [f"{total} {claim_word} to close {subject}", ""]
+    for index, claim in enumerate(claims, start=1):
+        state = " ".join(
+            part
+            for part in (
+                claim.get("state"),
+                "draft" if claim.get("draft") else "",
+                "merged" if claim.get("merged") else "",
+            )
+            if part
+        )
+        head = (
+            f"{index}. {claim.get('repo')}#{claim.get('number')} {claim.get('type')}  "
+            f"{state}  {claim.get('age')}  {claim.get('relationship')}"
+        )
+        if claim.get("author"):
+            head += f"  @{claim['author']}"
+        lines.append(head)
+        if claim.get("title"):
+            lines.append(f"   {quote(claim['title'])}")
+        if claim.get("url"):
+            lines.append(f"   {claim['url']}")
+        lines.append("")
+    if total > len(claims):
+        lines.append(f"({total - len(claims)} more, not shown.)")
+    return envelope("\n".join(lines).rstrip())
 
 
 def render_status(payload: dict[str, Any]) -> str:

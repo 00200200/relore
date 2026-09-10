@@ -140,6 +140,32 @@ starts after it.
 ghlore thread 48630 --full            # the whole opening post, reproduction included
 ```
 
+## "Is somebody already fixing this?"
+
+Ask it **before** diagnosing. It is one hop through the `Fixes|Closes|Resolves #N` edge,
+and it prevents an agent's most expensive mistake — writing a patch for something already
+in review.
+
+```
+$ ghlore inflight 48630
+
+1 thread claims to close huggingface/transformers#48630
+
+1. huggingface/transformers#48672 pr  open  8h  closes  @somebody
+   fix: respect partial_rotary_factor in GPTNeoXJapaneseRotaryEmbedding
+   https://github.com/huggingface/transformers/pull/48672
+```
+
+Every row carries `state`, `draft` and whether it merged, because those imply opposite next
+actions: an approved pull request means stop, a stale draft means supersede it, a merged one
+means the fix has shipped and the issue may simply need closing.
+
+The **empty** answer is the one to read carefully. `nothing in the index claims to close …`
+is an answer; the same sentence followed by *"this repository has no relationship rows at
+all"* is not — it means the index was derived before the edge existed, and `ghlored derive`
+fills it. There is no trust floor here: the deployment's own bot having an open fix is
+precisely the duplicate you must not create.
+
 ## The offline verbs
 
 `map`, `defs` and `refs` need **no server, no index and no network** — they read the

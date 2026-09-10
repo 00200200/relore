@@ -5,7 +5,7 @@ and ``tests/unit/test_no_dialect_leak.py`` asserts it.
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -370,6 +370,10 @@ SIGNAL_TABLES: tuple[tuple[str, Any, tuple[str, ...]], ...] = (
     ("errors", s.thread_errors, ("exception_type", "message_norm")),
     ("tests", s.thread_tests, ("test_id", "test_function")),
     ("commits", s.thread_commits, ("sha", "message")),
+    # Section 13.3. `target_thread_id` is part of the row rather than an update to it, so
+    # a target that becomes indexed later changes the row and the reconcile notices --
+    # the same reason `trust` is in DERIVED_COLUMNS.
+    ("links", s.thread_links, ("relationship", "target_number", "target_thread_id")),
 )
 
 
@@ -501,6 +505,26 @@ def merged_by_logins(conn: Connection, repo: str) -> set[str]:
             )
         )
     } - {None}
+
+
+def thread_ids_by_number(conn: Connection, repo: str, numbers: Iterable[int]) -> dict[int, int]:
+    """``github_number -> threads.id`` for the numbers that are indexed.
+
+    A link's target is a number the source thread named, so resolving it to a row is a
+    lookup that can legitimately come back empty: an open pull request may well close an
+    issue nobody has indexed yet. The caller stores the claim either way (section 13.3).
+    """
+    wanted = list(dict.fromkeys(numbers))
+    if not wanted:
+        return {}
+    return {
+        int(number): int(thread_id)
+        for number, thread_id in conn.execute(
+            select(s.threads.c.github_number, s.threads.c.id).where(
+                s.threads.c.repo == repo, s.threads.c.github_number.in_(wanted)
+            )
+        )
+    }
 
 
 def threads_authored_by(conn: Connection, repo: str, logins: set[str]) -> list[int]:

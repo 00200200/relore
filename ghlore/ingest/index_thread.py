@@ -22,6 +22,7 @@ from ghlore.ingest.authority import WRITE_PERMISSIONS, bot_accounts
 from ghlore.ingest.chunk import chunk, content_hash
 from ghlore.ingest.extract import extract_signals
 from ghlore.ingest.normalize import normalize, redact
+from ghlore.ingest.relationships import extract_links
 from ghlore.ingest.timestamps import parse_timestamp
 from ghlore.ingest.versions import CHUNKING_VERSION, EXTRACTOR_VERSION
 from ghlore.store import repository as repo_layer
@@ -119,9 +120,15 @@ def derive_thread(
     # Section 5.3, in the same transaction as the documents it was extracted from: a
     # thread whose signals belong to a body it no longer has is worse than one with no
     # signals, because the `--file`/`--error` filters would answer from it.
-    signals = repo_layer.reconcile_signals(
-        conn, thread_id, extract_signals(sources, detail=detail).rows()
+    rows = extract_signals(sources, detail=detail).rows()
+    # Section 13.3: the claim comes from this thread alone, the resolution from the index.
+    # A target nobody has indexed yet is stored unresolved rather than dropped -- an open
+    # pull request closing an unindexed issue is the *normal* case on a sampled index, and
+    # dropping the edge would answer "is anyone fixing this?" with silence.
+    rows["links"] = _resolve_links(
+        conn, repo, extract_links(thread_type, number, documents, detail, repo=repo)
     )
+    signals = repo_layer.reconcile_signals(conn, thread_id, rows)
     return IndexResult(
         repo=repo,
         number=number,
@@ -131,6 +138,16 @@ def derive_thread(
         redactions=redactions,
         signals=signals,
     )
+
+
+def _resolve_links(
+    conn: Connection, repo: str, links: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Fill in ``target_thread_id`` for the targets that are in the index."""
+    if not links:
+        return links
+    ids = repo_layer.thread_ids_by_number(conn, repo, [link["target_number"] for link in links])
+    return [{**link, "target_thread_id": ids.get(link["target_number"])} for link in links]
 
 
 # -- rows ------------------------------------------------------------------

@@ -32,8 +32,9 @@ resolution with the query-kind trust floors (§13.1 #9), **§5.3's extraction pa
 what it measured), **§6's query expansion** (§10.4), and **§6's weighted ranking**
 (§10.5). `ghlored migrate |
 fetch | backfill | sample | derive | poll | sweep | authority | mine | judge | bench |
-serve | status` and `ghlore search | thread | status | map | defs | refs` work end to end.
-~10,000 lines under `ghlore/`, **638 tests**, every store-level and retrieval-level one on
+serve | status` and `ghlore search | thread | inflight | status | map | defs | refs` work
+end to end.
+~11,000 lines under `ghlore/`, **747 tests**, every store-level and retrieval-level one on
 both dialects. The `--file`/`--symbol`/`--error`/`--test` filters answer. **Retrieval is
 ranked**: full text, filters, the trust floor, the expansion fan-out and §6's weighted
 score. Kind-aware decay is built and **gated off** (`ranking.DECAY_ENABLED`) — §6's table
@@ -68,9 +69,9 @@ there, not only the bot one — see §10, where the 18-vs-4,071 measurement is r
 
 | Built | Empty — nothing written yet |
 | --- | --- |
-| `store/` — `schema.py`, `dialect.py`, `migrations/` (5 steps), `repository.py`, `documents_history` (§14.1) | `ingest/plugins.py`, `github/relationships.py` |
-| `github/` — `client.py`, `bulk.py`, `graphql.py`, `fetch_thread.py` | `precedents`, `thread_links` and `ghlore precedent` — milestone 4 |
-| `ingest/` — normalize, chunk, timestamps, versions, `extract` (§5.3), `index_thread`, `poll`, `backfill`, `sample` (§5.5), `sweep` | `code/` — the *server-side* half of the lens: the working clone, `path_aliases`, `enclosing_symbol` at derive time |
+| `store/` — `schema.py`, `dialect.py`, `migrations/` (6 steps), `repository.py`, `documents_history` (§14.1) | `ingest/plugins.py` |
+| `github/` — `client.py`, `bulk.py`, `graphql.py`, `fetch_thread.py` | `precedents` and `ghlore precedent` — milestone 4 |
+| `ingest/` — normalize, chunk, timestamps, versions, `extract` (§5.3), `relationships` (§13.3), `index_thread`, `poll`, `backfill`, `sample` (§5.5), `sweep` | `code/` — the *server-side* half of the lens: the working clone, `path_aliases`, `enclosing_symbol` at derive time |
 | `search/` — `SearchBackend` per dialect, filters, caps, the thread view, §6.2's query-kind trust floors, `expansion.py` (§6, §10.4), `ranking.py` (§6, §10.5) | |
 | `bench/` — §10's evaluation set, the miner, the label fold, and the runner with both baselines | |
 | `ingest/authority.py` — §6.2 write-access resolution, and `repo_authority` | |
@@ -80,9 +81,14 @@ there, not only the bot one — see §10, where the 18-vs-4,071 measurement is r
 | `render.py` — one renderer for the CLI and the UI's raw view | |
 | `cli.py` and `daemon.py` — every verb above; the rest exit with their milestone | |
 
-Tables that exist but nothing populates: `thread_links` (milestone 4 — it is a foreign key
-to `threads` on *both* ends, so a link needs the target thread indexed, which is a pass over
-the corpus rather than over one thread), `path_aliases`, `precedents`, `precedent_signals`.
+Tables that exist but nothing populates: `path_aliases`, `precedents`, `precedent_signals`.
+**`thread_links` is now written** (§13.3): the derive pass records "this pull request claims
+to close #N" and `ghlore inflight` walks it backwards. It used to be a foreign key to
+`threads` on *both* ends, which is why nothing ever wrote it — an edge was unstorable until
+its target was indexed, so a corpus-wide pass had to exist before a single edge did. It now
+carries `target_number` (known from the source thread alone, so the poll fills it) and a
+nullable `target_thread_id` (the resolution, which only ranking's `w_rel` needs). Migration
+6 recreates the table; it was empty on every database that exists.
 There is no keywords table and §5.3's keywords are deliberately not extracted — no term in
 §6's score reads them, so they would be rows nothing looks at (§13.2).
 `documents.trust` is derived from the
@@ -119,9 +125,11 @@ when there is nothing left to fold), so `bench` needs no `--allow-unfrozen`.
 **Milestone 4 is next when building resumes** (see §15 first), and two of its pieces are
 owed to measurements already taken:
 rename chains, because §13's caveat says file overlap has a recall floor without them; and
-`thread_links`, because §10.5 #1 found the §6 weight *values* cannot be falsified on this
-corpus at all — they only discriminate over evidence a filter did not already require, and
-`w_rel` would be the first term that does.
+`w_rel`, because §10.5 #1 found the §6 weight *values* cannot be falsified on this corpus at
+all — they only discriminate over evidence a filter did not already require, and a
+relationship term would be the first that does. `thread_links` itself now exists (§13.3),
+pulled forward out of milestone 4 because *using* the tool asked for it: the duplicate-work
+query is one hop through an edge the data model already declared, and nothing filled it.
 
 Two measurements to carry into that work rather than re-derive:
 

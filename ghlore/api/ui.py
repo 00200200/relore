@@ -375,7 +375,9 @@ $("#cli-setup").textContent =
   `\nexport GHLORE_TOKEN=<your token>   # only if this daemon requires one`;
 $("#agent-snippet").textContent =
   `## Project history\n\n` +
-  `This project's issue and PR history is indexed and searchable with \`ghlore\`.\n` +
+  `This project's issue and PR history is indexed and searchable with \`ghlore\`.\n\n` +
+  `Before you start work on an issue, check whether somebody already is:\n\n` +
+  `    ghlore inflight <issue number>\n\n` +
   `Before changing unfamiliar code, ask it why the code is the way it is:\n\n` +
   `    ghlore search "<the error, symbol, or question>" --kind failure|rationale|precedent\n` +
   `    ghlore search "<question>" --file <path>     # scope to a file\n` +

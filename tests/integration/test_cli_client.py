@@ -209,6 +209,34 @@ def test_thread_full_serves_the_body_the_cap_was_hiding(wired, engine, fake, cap
     assert "rotary_pct" in whole
 
 
+def test_inflight_names_the_pull_request_that_already_claims_the_issue(
+    wired, engine, fake, capsys
+) -> None:
+    """The call that prevents the most expensive mistake an agent makes
+    (huggingface/ghlore#10)."""
+    fake.add_issue(1, title="crashes for any rotary_pct != 1.0")
+    fake.add_pr(2, title="fix: respect partial_rotary_factor", body="Fixes #1")
+    _index(engine, fake, 1, 2)
+
+    out = _run(capsys, "inflight", "1")
+
+    assert "#2" in out and "open" in out
+    assert "respect partial_rotary_factor" in out
+
+
+def test_inflight_tells_a_clean_answer_from_an_unanswerable_one(
+    wired, engine, fake, capsys
+) -> None:
+    fake.add_issue(1)
+    _index(engine, fake, 1)
+
+    out = _run(capsys, "inflight", "1")
+
+    assert "nothing in the index claims to close" in out
+    # No relationship rows at all, so the empty answer is not yet an answer.
+    assert "no relationship rows" in out
+
+
 def test_status_names_the_backend(wired, engine, capsys) -> None:
     """Section 4.1: a surprising result set should be diagnosable rather than mysterious."""
     out = _run(capsys, "status")

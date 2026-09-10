@@ -21,6 +21,7 @@ from ghlore.search.queries import (
     QUERY_KINDS,
     SORTS,
     Hit,
+    InflightView,
     ThreadView,
 )
 
@@ -127,6 +128,38 @@ def hit_json(hit: Hit, *, compact: bool = False) -> dict[str, Any]:
         out["score"] = round(hit.score, 6)
         out["breakdown"] = {k: round(v, 6) for k, v in hit.breakdown.items()}
     return out
+
+
+def inflight_json(view: InflightView) -> dict[str, Any]:
+    """``GET /api/v1/inflight/{n}`` -- what claims to close this thread.
+
+    ``links_indexed`` is here for the reason every count in this module is: an index with
+    no relationship rows answers every question with an empty list, and an agent cannot
+    tell that from "nobody is working on this" -- which are opposite instructions.
+    """
+    return {
+        "repo": view.repo,
+        "number": view.number,
+        "claims": [
+            {
+                "repo": claim.repo,
+                "number": claim.number,
+                "type": claim.thread_type,
+                "title": claim.title,
+                "url": claim.url,
+                "author": claim.author,
+                "state": claim.state,
+                "draft": claim.draft,
+                "merged": claim.merged,
+                "age": claim.age,
+                "relationship": claim.relationship,
+            }
+            for claim in view.claims
+        ],
+        "claims_returned": len(view.claims),
+        "claims_total": view.total,
+        "links_indexed": view.links_indexed,
+    }
 
 
 def thread_json(view: ThreadView, *, compact: bool = False) -> dict[str, Any]:

@@ -77,7 +77,9 @@ _PR_FIELDS = f"""
       totalCount
       nodes {{ commit {{ oid messageHeadline messageBody }} }}
     }}
-    closingIssuesReferences(first: 10) {{ nodes {{ number }} }}
+    closingIssuesReferences(first: 10) {{
+      nodes {{ number repository {{ nameWithOwner }} }}
+    }}
 """
 
 
