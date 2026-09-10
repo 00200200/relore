@@ -176,7 +176,7 @@ def test_thread_states_how_much_it_withheld(wired, engine, fake, capsys) -> None
     assert "never returnable in full" in out
 
 
-def test_thread_focus_selects_the_answering_comment(wired, engine, fake, capsys) -> None:
+def test_thread_focus_ranks_the_answering_comment_first(wired, engine, fake, capsys) -> None:
     pr = fake.add_pr(1)
     for i in range(20):
         fake.add_comment(pr, 100 + i, f"filler {i}", created_at=f"2026-01-01T00:{i:02d}:00Z")
@@ -186,7 +186,9 @@ def test_thread_focus_selects_the_answering_comment(wired, engine, fake, capsys)
     out = _run(capsys, "thread", "1", "--focus", "rotary embedding")
 
     assert "rotary embedding is the culprit" in out
-    assert "filler" not in out
+    assert out.index("rotary embedding is the culprit") < out.index("filler")
+    # The denominator, so a caller can tell a ranked page from a matched one.
+    assert "carry every term" in out
 
 
 def test_status_names_the_backend(wired, engine, capsys) -> None:

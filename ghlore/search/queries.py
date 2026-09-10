@@ -175,6 +175,14 @@ class ThreadView:
     files: tuple[str, ...] = ()
     links: tuple[dict[str, Any], ...] = ()
     total_documents: int = 0
+    #: What ``focus`` asked, and how many comments carry *every* one of its terms. A focus
+    #: **orders** a thread's comments and never selects them (see
+    #: :meth:`ghlore.search.backends.base.SearchBackend._focused`), so this is the
+    #: denominator that says whether the ranking had anything to work with -- and a zero
+    #: here next to ten returned comments is the honest shape of "your question matched
+    #: nothing, so this is the thread in order".
+    focus: str = ""
+    focus_matched: int | None = None
 
 
 @dataclass(frozen=True)

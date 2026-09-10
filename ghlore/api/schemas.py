@@ -149,4 +149,9 @@ def thread_json(view: ThreadView, *, compact: bool = False) -> dict[str, Any]:
         "comments": [hit_json(hit, compact=compact) for hit in view.comments],
         "comments_returned": len(view.comments),
         "comments_total": view.total_documents,
+        # A focus orders the comments and never selects them, so the count that matters is
+        # how many carried every term: zero next to ten returned comments says "your
+        # question matched nothing, this is the thread in order" rather than "nothing here".
+        "focus": view.focus,
+        "focus_matched": view.focus_matched,
     }

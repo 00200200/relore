@@ -369,7 +369,7 @@ def test_without_a_focus_a_thread_returns_its_opening_and_its_closing(
     assert "comment 0" in bodies and "comment 39" in bodies
 
 
-def test_a_focus_selects_the_comments_that_answer_it(engine: Engine, fake: FakeGitHub) -> None:
+def test_a_focus_ranks_the_answering_comment_first(engine: Engine, fake: FakeGitHub) -> None:
     pr = fake.add_pr(1)
     for i in range(40):
         fake.add_comment(pr, 100 + i, f"filler {i}", created_at=f"2026-01-01T00:{i:02d}:00Z")
@@ -379,7 +379,42 @@ def test_a_focus_selects_the_comments_that_answer_it(engine: Engine, fake: FakeG
     view = open_backend(engine).thread(REPO, 1, focus="rotary embedding")
 
     assert view is not None
-    assert [c.snippet for c in view.comments] == ["the rotary embedding is the culprit"]
+    assert view.comments[0].snippet == "the rotary embedding is the culprit"
+    assert view.focus_matched == 1
+
+
+def test_a_focus_orders_a_thread_and_never_empties_it(engine: Engine, fake: FakeGitHub) -> None:
+    """The failure this exists for: every term is in the thread, no one comment carries
+    them all, and the conjunction returned ``0 of 30`` on a thread with 30 comments --
+    which reads as "nothing relevant here" and is not what it meant."""
+    pr = fake.add_pr(1)
+    fake.add_comment(pr, 100, "use_cache is the flag", created_at="2026-01-01T00:00:00Z")
+    fake.add_comment(pr, 101, "gradient checkpointing is on", created_at="2026-01-01T00:01:00Z")
+    fake.add_comment(pr, 102, "the warning is harmless", created_at="2026-01-01T00:02:00Z")
+    _index(engine, fake, 1)
+
+    view = open_backend(engine).thread(REPO, 1, focus="use_cache gradient checkpointing warning")
+
+    assert view is not None
+    # No comment carries all four terms, so the honest denominator is zero -- and the
+    # thread still comes back, best first.
+    assert view.focus_matched == 0
+    assert len(view.comments) == 3
+
+
+def test_a_focus_no_comment_can_match_still_returns_the_thread(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    pr = fake.add_pr(1)
+    for i in range(4):
+        fake.add_comment(pr, 100 + i, f"filler {i}", created_at=f"2026-01-01T00:{i:02d}:00Z")
+    _index(engine, fake, 1)
+
+    view = open_backend(engine).thread(REPO, 1, focus="nothing here says any of this")
+
+    assert view is not None
+    assert view.focus_matched == 0
+    assert len(view.comments) == 4
 
 
 def test_a_missing_thread_is_none_not_an_error(engine: Engine) -> None:

@@ -50,6 +50,7 @@ from ghlore.search.queries import (
     admissible_trust,
     render_age,
     snippet,
+    tokenize,
     trust_policy,
 )
 from ghlore.search.ranking import WEIGHTS, RankSpec, half_life
@@ -400,10 +401,10 @@ class SearchBackend(ABC):
     def thread(self, repo: str, number: int, *, focus: str = "") -> ThreadView | None:
         """One thread, capped (section 6).
 
-        ``focus`` selects which comments come back. Without it the selection is the
-        opening and the closing of the thread rather than the first N: on a long thread
-        the resolution is at the end, and returning only the beginning reliably returns
-        the part that was wrong.
+        ``focus`` **orders** which comments come back and never selects them -- see
+        :meth:`_focused`. Without it the order is the opening and the closing of the
+        thread rather than the first N: on a long thread the resolution is at the end, and
+        returning only the beginning reliably returns the part that was wrong.
         """
         with self.engine.connect() as conn:
             row = conn.execute(
@@ -442,7 +443,7 @@ class SearchBackend(ABC):
                 )
             )
             body = self._body(conn, row.id)
-            comments, total = self._comments(conn, row, focus)
+            comments, total, matched = self._comments(conn, row, focus)
 
         return ThreadView(
             repo=row.repo,
@@ -459,6 +460,8 @@ class SearchBackend(ABC):
             files=files,
             links=links,
             total_documents=total,
+            focus=focus,
+            focus_matched=matched,
         )
 
     def _body(self, conn: Any, thread_id: int) -> str:
@@ -473,8 +476,11 @@ class SearchBackend(ABC):
         ).scalar_one_or_none()
         return snippet(text or "", limit=MAX_BODY_CHARS)
 
-    def _comments(self, conn: Any, thread: Any, focus: str) -> tuple[tuple[Hit, ...], int]:
+    def _comments(
+        self, conn: Any, thread: Any, focus: str
+    ) -> tuple[tuple[Hit, ...], int, int | None]:
         base = select(
+            s.documents.c.id,
             s.documents.c.source_type,
             s.documents.c.url,
             s.documents.c.author,
@@ -488,25 +494,14 @@ class SearchBackend(ABC):
         )
         total = len(conn.execute(base).all())
 
+        matched: int | None = None
         if focus.strip():
-            score = self.fts_score(focus)
-            stmt = self.fts_filter(base.add_columns(score.label("score")), focus).order_by(
-                score.desc()
-            )
-            rows = list(conn.execute(stmt.limit(MAX_THREAD_COMMENTS)))
+            matched = len(conn.execute(self.fts_filter(base, focus)).all())
+            rows = self._focused(conn, base, focus)
         else:
-            rows = _ends(
-                list(
-                    conn.execute(
-                        base.add_columns(literal(0.0).label("score")).order_by(
-                            s.documents.c.github_created_at.asc().nullslast()
-                        )
-                    )
-                ),
-                MAX_THREAD_COMMENTS,
-            )
+            rows = _chronological(conn, base, MAX_THREAD_COMMENTS)
 
-        terms = tuple(focus.split())
+        terms = tokenize(focus)
         hits = tuple(
             Hit(
                 repo=thread.repo,
@@ -524,7 +519,66 @@ class SearchBackend(ABC):
             )
             for row in rows
         )
-        return hits, total
+        return hits, total, matched
+
+    def _focused(self, conn: Any, base: Select, focus: str) -> list[Any]:
+        """Order a thread's comments by a focus query. **Never filter on it.**
+
+        The thread *is* the admission decision, and there is none left to make inside it.
+        Both engines' text filter is a conjunction -- ``plainto_tsquery`` is a plain AND,
+        FTS5 gets one quoted term per word -- which is right for corpus-wide ``search``,
+        where it is what stops a pasted sentence matching everything. Applied inside one
+        thread it empties the page as soon as the caller passes a sentence, and ``--help``
+        invites exactly that ("select the comments that answer this").
+
+        Measured on ``huggingface/transformers#28056``, 30 comments: ``cache`` returned 10,
+        ``use_cache gradient`` 2, ``use_cache gradient checkpointing warning`` **0**. Every
+        term is in the thread; no single comment carries all four. A monotonic decrease
+        with term count ending in an empty page is the signature, and an empty page reads
+        as "this thread has nothing relevant" -- the one thing it did not mean.
+
+        So the focus scores, and the page is never empty on a thread that has comments.
+        Postgres ranks the whole thread with the disjunction
+        :meth:`unfiltered_fts_score` already builds, so an all-terms match still sorts
+        first and a partial match follows it. FTS5 cannot score what it did not ``MATCH``
+        (see the sqlite backend), so there the matched comments lead and the chronological
+        remainder fills the rest of the page.
+        """
+        ranking = self.unfiltered_fts_score(focus)
+        if ranking is not None:
+            return list(
+                conn.execute(
+                    base.add_columns(ranking.label("score"))
+                    .order_by(ranking.desc(), s.documents.c.github_created_at.asc().nullslast())
+                    .limit(MAX_THREAD_COMMENTS)
+                )
+            )
+
+        score = self.fts_score(focus)
+        rows = list(
+            conn.execute(
+                self.fts_filter(base.add_columns(score.label("score")), focus)
+                .order_by(score.desc())
+                .limit(MAX_THREAD_COMMENTS)
+            )
+        )
+        if len(rows) >= MAX_THREAD_COMMENTS:
+            return rows
+        chosen = {row.id for row in rows}
+        remainder = [row for row in _chronological(conn, base, None) if row.id not in chosen]
+        return rows + _ends(remainder, MAX_THREAD_COMMENTS - len(rows))
+
+
+def _chronological(conn: Any, base: Select, limit: int | None) -> list[Any]:
+    """A thread's comments oldest-first, scored zero: the order with nothing to rank."""
+    rows = list(
+        conn.execute(
+            base.add_columns(literal(0.0).label("score")).order_by(
+                s.documents.c.github_created_at.asc().nullslast()
+            )
+        )
+    )
+    return rows if limit is None else _ends(rows, limit)
 
 
 def _breakdown(row: Any) -> dict[str, float]:

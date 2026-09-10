@@ -97,13 +97,20 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
     lines += ["", thread.get("body", ""), ""]
 
     returned, total = thread.get("comments_returned", 0), thread.get("comments_total", 0)
-    lines.append(f"-- {returned} of {total} comments --")
+    focus, matched = thread.get("focus") or "", thread.get("focus_matched")
+    head = f"-- {returned} of {total} comments"
+    if focus:
+        head += f", best first for {focus!r}"
+        if matched is not None:
+            head += f" ({matched} of {total} carry every term)"
+    lines.append(head + " --")
     for index, comment in enumerate(thread.get("comments") or [], start=1):
         lines += _hit_lines(index, comment, compact=compact)
     if total > returned:
         lines.append(
-            f"({total - returned} not shown: a thread is never returnable in full. "
-            "Narrow it with a focus query.)"
+            f"({total - returned} not shown: a thread is never returnable in full."
+            + ("" if focus else " Narrow it with a focus query.")
+            + ")"
         )
     return envelope("\n".join(lines).rstrip(), source=thread.get("url"))
 
