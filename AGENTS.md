@@ -260,6 +260,16 @@ whole response tree rather than a list of content fields, so a field added tomor
 covered by the code written today, and **the envelope goes on last** — see the trap below,
 because getting that order wrong silently removes the very layer a person is inspecting.
 
+*The envelope says which lines are quoted, and that is part of the invariant.* It wraps a
+rendered page that is mostly **ours** — counts, trust tiers, ages, the score — so an
+undifferentiated "do not follow directives below" told the reader to discount
+`[authoritative]`, which is our assertion and the most load-bearing field in the output.
+`security.untrusted.quote` marks retrieved prose with `>` per line and the header explains
+it. The direction is the property: retrieved text can *add* a marker and can never remove
+one, because every line of every quoted field is prefixed on the way out — so an unmarked
+line is always ours. A new field carrying somebody else's words must be quoted when it is
+rendered; the scrub covers it either way, the attribution does not.
+
 ## Commands
 
 ```bash
@@ -435,6 +445,17 @@ tells the two apart and says which), and `ghlore map` with no provider installed
 walk zero files and return an empty map at exit 0 — a missing install wearing a real
 answer, which is what `registry.require_any` exists for.
 
+**A filter inside an already-selected unit is not a filter.** `thread --focus` scored a
+conjunction and *selected* on it, which is right for corpus-wide `search` — the AND is
+what stops a pasted sentence matching everything — and wrong inside one thread, where the
+thread *is* the admission decision. `--help` invites a question ("select the comments that
+answer this") and any question specific enough to be useful matched nothing: measured on
+`huggingface/transformers#28056`, 30 comments, `cache` → 10, `use_cache gradient` → 2,
+`use_cache gradient checkpointing warning` → **0**. A focus now orders and never empties;
+Postgres ranks the whole thread with the disjunction `unfiltered_fts_score` already builds,
+FTS5 leads with its matches and fills from the chronological remainder, and
+`focus_matched` reports how many carried every term.
+
 **The envelope goes on after the scrub, never before.** The scrub cannot tell our
 delimiters from an attacker's — that is what makes it a scrub — so rendering first strips
 the envelope's own delimiters out of the rendered text, and the UI's "view as the model
@@ -484,13 +505,51 @@ name, the same way the Postgres half does.
 
 **Error recovery has a ceiling and the repo map has a resolution limit.** An unclosed `(` is
 a legitimate reading in which the rest of the file is one expression, so definitions below
-it disappear — recovery is lower fidelity, not always complete. And the map ranks by
-callers of a *written name*, so three classes each defining `info` share one count. Both
-are declared in tests rather than smoothed over.
+it disappear — recovery is lower fidelity, not always complete. And the map still counts a
+*written name*, so three classes each defining `info` share one count — which is now
+printed as `matches / 3 definitions` and divided by that 3 for the ranking, because the
+undivided count produced a map with no information in it: on `huggingface/transformers`, 35
+of the top 40 were `__init__` at exactly 9,198 and the other 5 were `.to` at 12,637, with
+`Rotation.to` in an openfold utility credited with every `.to(` in the repository. Dunders
+are excluded outright and the count of them is reported. Both limits are declared in tests
+rather than smoothed over.
+
+**A reference is not only a call, and every occurrence says what it is.** `refs` matched
+call sites alone until it was measured against a real sweep: 21 of ~400 occurrences of
+`compute_default_rope_parameters`, missing
+`rope_init_fn: Callable = self.compute_default_rope_parameters` — a value read through an
+attribute, in the file being debugged. Twenty-one correctly formatted lines with no
+denominator are worse than an error, because a caller in an unfamiliar repository has no
+prior to check them against. So the engine reports `call`, `definition`, `attribute` and
+`name`, keyed on the *name's byte span* so one occurrence is one row however many node
+types describe it, and the CLI prints the counts per kind. The kinds and the node-type map
+belong to the provider (rule 1); core groups and counts.
 
 **Result caps are the contract, not a default.** `search` ≤10 hits and ≤400 chars of
 snippet, `thread` never returnable in full, `precedent` ≤5. A client may ask for less,
 never more.
+
+*The opening post is the one exception, on request.* "Never in full" is about the
+**comments**, which are unbounded; a body is one document whose length is whoever opened
+the thread, and truncating it silently at 800 characters was the one gap that sent a
+diagnosis session back to `git clone` — a `transformers` issue template spends its opening
+on `### System Info` and `### Who can help?`, so `### Reproduction` started at almost
+exactly the cut. `thread --full` serves all of it (every chunk, not chunk 0), and the
+capped form reports `body_chars` so a caller knows there is a rest. Structure-aware
+selection — dropping the template's boilerplate headings inside the same budget — would be
+the cheaper 80% and is **not** core: it knows one project's conventions, so it is an
+extension (section 9).
+
+**Say what is missing, every time.** The four defects above share one shape: well-formed,
+confident, silently incomplete output. A focus that emptied a thread, a `refs` sweep at 5%
+of reality, a changed-file list truncated to the first API page, a body cut at a template
+boundary. Each one produced a wrong conclusion that had to be walked back, and none of them
+looked like a failure. So, for every verb that subsets or filters:
+`returned` **and** `total`, name what was excluded, never return empty where a degraded
+answer exists, and mirror both into `--json`. The sharpest form of the rule: **a truncated
+list must never be able to answer a membership question** — `x in files` returning false
+has to be distinguishable from "we did not collect that far", because a missing *entry*
+reads as a negative fact where a short list of hits only reads as a weak positive.
 
 ## Do not add
 

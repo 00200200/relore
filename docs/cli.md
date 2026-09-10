@@ -7,6 +7,11 @@ look like, and the four ways they come back empty when the index is healthy.
 Every command below was run against a real index of `huggingface/serge`: 114 threads, 415
 documents, Postgres backend.
 
+**The sample output is elided.** A real response is wrapped in the untrusted-content
+envelope, and inside it the quoted lines — a title, a snippet, a body — each carry a `>`
+so that our counts and trust tiers cannot be mistaken for something a stranger wrote. The
+blocks below drop both, to keep the shape of the answer readable.
+
 ---
 
 ## Query like this, not like that
@@ -57,11 +62,11 @@ $ ghlore --compact search "429" --limit 2
    https://github.com/huggingface/serge/pull/92
 ```
 
-`--compact` and `--json` are **global** flags — they go before the verb:
+`--compact` and `--json` are global flags, accepted on **either side** of the verb:
 
 ```bash
-ghlore --compact search "429"      # correct
-ghlore search "429" --compact      # error: unrecognized arguments
+ghlore --compact search "429"      # both work
+ghlore search "429" --compact
 ```
 
 Every hit carries its **age** (`15d`) and its **trust tier** (`[authoritative]`). Age
@@ -115,13 +120,25 @@ $ ghlore search "review" --trust machine
 ```
 $ ghlore thread 92 --focus "backoff retry"
 ...
--- 0 of 1 comments --
-(1 not shown: a thread is never returnable in full. Narrow it with a focus query.)
+-- 10 of 30 comments, best first for 'backoff retry' (2 of 30 carry every term) --
+(20 not shown: a thread is never returnable in full.)
 ```
 
-`--focus` selects comments by relevance to *that* query. A 200-comment thread has no full
-form; `search` is capped at 10 hits and 400 characters of snippet. The caps are the
-contract, not a default (§6).
+`--focus` **orders** the comments, it never selects them: the thread is the admission
+decision, and there is none left to make inside it. So a question that no single comment
+answers word for word still comes back as that thread's ten most relevant comments, and the
+count says how many carried every term — `0 of 30` next to ten comments means "nothing
+matched your wording, here is the thread in order" rather than "nothing here".
+
+A 200-comment thread has no full form; `search` is capped at 10 hits and 400 characters of
+snippet. The caps are the contract, not a default (§6). The *body* is the exception, and
+only on request: `--full` serves the opening post whole, because an issue template spends
+its first several hundred characters on environment boilerplate and the reproduction
+starts after it.
+
+```bash
+ghlore thread 48630 --full            # the whole opening post, reproduction included
+```
 
 ## The offline verbs
 
@@ -135,14 +152,31 @@ $ ghlore defs ghlore/ingest/authority.py
 120-156      function  _resolve_one
 
 $ ghlore refs resolve_authority
-./ghlore/daemon.py:211
-./ghlore/ingest/backfill.py:117
+./ghlore/daemon.py:293  name
+./ghlore/daemon.py:298  call
+./ghlore/ingest/authority.py:88  definition
+./ghlore/ingest/backfill.py:117  call
+-- 9 references in 95 files (5 call, 1 definition, 3 name)
 
-$ ghlore map ghlore/ingest
-48 definitions in 10 files, top 40 by callers
-  parse_timestamp            function  10 callers   ghlore/ingest/timestamps.py:19
-  derive_thread              function  5 callers    ghlore/ingest/index_thread.py:89
+$ ghlore map ghlore/ingest --limit 2
+74 definitions in 12 files, top 2 by name matches per definition
+  (a count of the written *name*: same-named definitions share it, so the definition
+   count is how much this row overstates)
+  parse_timestamp     function  16 matches / 1 definition   ghlore/ingest/timestamps.py:19
+  iso_utc             function  11 matches / 1 definition   ghlore/ingest/timestamps.py:29
 ```
+
+`refs` reports **every occurrence and what it is** — a call, a definition, an attribute
+read, a bare mention — with the counts per kind. Calls alone missed 95% of the sites in a
+real sweep, including `self.foo` assigned rather than called, and a short list with no
+denominator reads as the whole truth. `attribute` and `name` rows are matched on the bare
+name, so they are the last mention of the chain (`a.b.foo` matches `foo`): reading them is
+part of the answer, not a promise that a type was resolved.
+
+`map` counts a written *name*, so definitions sharing one share the count — which is why
+both numbers are printed and the ranking divides by the second. Dunders are excluded: they
+are the same name everywhere, and a top 40 of `__init__` is the same list for every Python
+project.
 
 ---
 
