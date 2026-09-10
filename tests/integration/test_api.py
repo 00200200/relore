@@ -148,6 +148,88 @@ def test_a_wildcard_token_is_resolved_to_concrete_names(engine: Engine, fake) ->
     assert _search(client, query="scoped")["query"]["repos"] == [REPO]
 
 
+# -- the request's own repo filter, which may only subtract ----------------
+
+OTHER = "someone/else"
+
+
+def _two_repos(engine: Engine) -> None:
+    """Two indexed repositories sharing a word, so only a filter can separate them."""
+    for name in (REPO, OTHER):
+        repo = FakeGitHub(name)
+        repo.add_pr(1, body="a shared wording")
+        with repo.client() as client:
+            index_thread(engine, client, name, 1)
+
+
+def _scoped(engine: Engine, *repos: str) -> TestClient:
+    auth = Authenticator(tokens=(Token("t", "secret", repos=repos or None),))
+    client = TestClient(build_app(engine, auth=auth))
+    client.headers["authorization"] = "Bearer secret"
+    return client
+
+
+def test_a_repo_filter_narrows_the_page_to_one_repository(engine: Engine) -> None:
+    _two_repos(engine)
+    client = _scoped(engine)
+
+    payload = _search(client, query="shared", repos=[REPO])
+
+    assert payload["query"]["repos"] == [REPO]
+    assert {hit["repo"] for hit in payload["hits"]} == {REPO}
+
+
+def test_an_absent_repo_filter_is_every_repository_in_scope(engine: Engine) -> None:
+    """The default has to stay the default: a filter nobody set must not narrow anything."""
+    _two_repos(engine)
+    client = _scoped(engine)
+
+    payload = _search(client, query="shared")
+
+    assert sorted(payload["query"]["repos"]) == sorted([OTHER, REPO])
+    assert {hit["repo"] for hit in payload["hits"]} == {OTHER, REPO}
+
+
+def test_a_repo_filter_cannot_reach_outside_the_token_scope(engine: Engine) -> None:
+    """The one that matters. ``repos`` is section 11's scope, not a preference, so the
+    request's list is intersected with it and can only ever remove names. Asking for a
+    repository the token cannot see leaves *nothing* in scope -- an empty page, never that
+    repository's content, and never an error that would confirm it exists.
+    """
+    _two_repos(engine)
+    client = _scoped(engine, REPO)
+
+    payload = _search(client, query="shared", repos=[OTHER])
+
+    assert payload["query"]["repos"] == []
+    assert payload["count"] == 0
+    assert payload["hits"] == []
+
+
+def test_a_repo_filter_naming_both_keeps_only_the_one_in_scope(engine: Engine) -> None:
+    """Intersection, not replacement -- the failure a union would have: a token scoped to
+    one repository asks for both and must still see only its own."""
+    _two_repos(engine)
+    client = _scoped(engine, REPO)
+
+    payload = _search(client, query="shared", repos=[REPO, OTHER])
+
+    assert payload["query"]["repos"] == [REPO]
+    assert {hit["repo"] for hit in payload["hits"]} == {REPO}
+
+
+def test_an_unindexed_name_in_the_filter_is_simply_absent(engine: Engine) -> None:
+    """A typo must not widen anything either, and must not be an error: a wildcard token's
+    scope is the *indexed* names, so a name nobody has indexed intersects to nothing."""
+    _two_repos(engine)
+    client = _scoped(engine)
+
+    payload = _search(client, query="shared", repos=["typo/nope"])
+
+    assert payload["query"]["repos"] == []
+    assert payload["count"] == 0
+
+
 def test_a_missing_token_is_401_when_tokens_are_configured(engine: Engine) -> None:
     auth = Authenticator(tokens=(Token("t", "secret", repos=None),))
     client = TestClient(build_app(engine, auth=auth))

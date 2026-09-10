@@ -146,7 +146,17 @@ _PAGE = """
       <option value="machine">machine (our own bots)</option>
     </select>
     <input name="file" placeholder="path filter" size="16">
+    <!-- Options are added by the health call, which is the only thing that knows what is
+         indexed. It can only narrow the token's scope, so the list is what you may already
+         see and "all repositories" is not a wildcard, it is "do not filter". -->
+    <select name="repo">
+      <option value="">all repositories</option>
+    </select>
     <input name="labels" placeholder="labels, comma-separated" size="18">
+    <select name="sort">
+      <option value="relevance">best match</option>
+      <option value="newest">newest first</option>
+    </select>
     <button class="primary">search</button>
     <button type="button" id="toggle-raw">view as the model sees it</button>
   </form>
@@ -308,6 +318,17 @@ async function health() {
       `<span><b>${n(s.documents)}</b> documents</span>` +
       `<span><b>${n(s.raw_objects)}</b> staged</span>` +
       `<div class="passes">${passes}${sampled}</div>`;
+    // The repo filter's options, deduped: a repo reports one pass per phase, so `passes`
+    // names most of them several times. Rebuilt on every health call rather than once,
+    // because the first call may have been refused and the second is the one that knows --
+    // and the current choice is restored, so re-checking does not silently drop a filter
+    // the user set and then search something else.
+    const chooser = $("#search").repo;
+    const known = [...new Set((s.passes || []).map((p) => p.repo))].sort();
+    const chosen = chooser.value;
+    chooser.innerHTML = `<option value="">all repositories</option>` +
+      known.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+    if (known.includes(chosen)) chooser.value = chosen;
   } catch (e) {
     if (e.message === AUTH_HINT) wantToken(true);
     $("#health").innerHTML = `<span class="error">index health: ${esc(e.message)}</span>`;
@@ -339,6 +360,11 @@ $("#samples").addEventListener("click", (event) => {
   form.kind.value = s.kind || "";
   form.trust.value = s.trust || "";
   form.file.value = s.file || "";
+  // Reset the two controls a sample does not set, for the same reason it overwrites the
+  // three above: a sample has to *land*, and one filtered to the other repository or
+  // ordered by date teaches the wrong lesson about what this answers well.
+  form.repo.value = "";
+  form.sort.value = "relevance";
   form.requestSubmit();
   form.scrollIntoView({behavior: "smooth", block: "start"});
 });
@@ -373,7 +399,11 @@ $("#search").addEventListener("submit", async (event) => {
     kind: f.get("kind") || null,
     trust: f.get("trust") || null,
     files: split(f.get("file")),
+    // An empty select means "do not filter", not "every repository": the server
+    // intersects this with the token's scope and can only ever narrow it.
+    repos: f.get("repo") ? [f.get("repo")] : [],
     labels: split(f.get("labels")),
+    sort: f.get("sort") || "relevance",
     // Always asked for: the toggle switches what is displayed, not what the server did,
     // so "view as the model sees it" cannot show a different query's rendering.
     render: true,
@@ -401,9 +431,18 @@ function paint() {
   if (!last) { $("#message").textContent = ""; return; }
   const {payload, request} = last;
   const floor = (payload.query.trust_floor || []).join(", ");
+  const scope = payload.query.repos || [];
   $("#message").textContent =
     `${payload.count} hit${payload.count === 1 ? "" : "s"} · trust floor: ${floor}` +
-    (payload.count === 0 ? " · nothing matched" : "");
+    // Say when the order is not relevance: a date-sorted page of weak matches otherwise
+    // reads as a broken ranking rather than as the question that was asked.
+    (payload.query.sort === "newest" ? " · newest first" : "") +
+    (scope.length === 1 ? ` · ${scope[0]} only` : "") +
+    // The fail-closed case, named. Filtering to a repository this token cannot see leaves
+    // no repository in scope, and "nothing matched" would blame the corpus for it.
+    (scope.length === 0
+      ? " · no repository in scope — that filter is outside this token's reach"
+      : payload.count === 0 ? " · nothing matched" : "");
   $("#raw").textContent = payload.rendered || "";
   $("#hits").innerHTML = showRaw ? "" : payload.hits.map((h, i) => card(h, i, request)).join("");
 }

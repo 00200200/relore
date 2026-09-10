@@ -25,7 +25,18 @@ from abc import ABC, abstractmethod
 from functools import reduce
 from typing import Any
 
-from sqlalchemy import Engine, Select, and_, case, exists, func, literal, or_, select
+from sqlalchemy import (
+    Engine,
+    Select,
+    and_,
+    case,
+    exists,
+    func,
+    literal,
+    nulls_last,
+    or_,
+    select,
+)
 
 from ghlore.search.queries import (
     HUMAN_TRUST,
@@ -181,7 +192,7 @@ class SearchBackend(ABC):
         return (
             select(best)
             .where(best.c.thread_rank <= MAX_HITS_PER_THREAD)
-            .order_by(*_order(best, scored))
+            .order_by(*_present_order(best, scored, query.sort))
             .limit(query.limit)
         )
 
@@ -531,7 +542,7 @@ def _breakdown(row: Any) -> dict[str, float]:
 
 
 def _order(source: Any, scored: bool) -> list[Any]:
-    """Best first, newest first, and stable.
+    """Best first, newest first, and stable. **The selection order.**
 
     Score leads only when there *is* one: ordering by a bound constant is at best ignored
     and at worst a type error, and recency is the honest order for a query with nothing to
@@ -541,9 +552,34 @@ def _order(source: Any, scored: bool) -> list[Any]:
 
     The id tail makes the order total, so a page is reproducible -- which matters when the
     next thing built on top of it is a labelling UI (section 8).
+
+    This one is used by the two ``row_number()`` windows that *choose* which document
+    represents a chunk and a thread, and it stays on relevance whatever the caller asked
+    to sort by -- see :func:`_present_order`.
     """
     lead = [source.c.score.desc()] if scored else []
     return [*lead, source.c.github_created_at.desc(), source.c.id.desc()]
+
+
+def _present_order(source: Any, scored: bool, sort: str) -> list[Any]:
+    """How the chosen hits are *presented*, which is not how they were chosen.
+
+    ``newest`` must not reach the ``row_number()`` windows. Section 10.6 is the record of
+    what happens when recency decides which document represents a thread: it picks the
+    thread's *last* one, which on a merged pull request is the approving review, and a real
+    query came back nine hits of ``LGTM``, ``Thx``, ``Nice!``, ``Yep``. Selecting on
+    relevance and then ordering by date gives the best answer *from* each thread, most
+    recent first -- which is what someone asking for a date sort wants, and not what
+    sorting the whole candidate set by date would return.
+
+    ``nulls_last`` because a document with no timestamp must not lead a date sort, and the
+    two dialects disagree on where a NULL goes by default: Postgres puts it first on
+    ``DESC``, SQLite last. As a tie-break that was invisible; as the leading key it decides
+    the page.
+    """
+    if sort == "newest":
+        return [nulls_last(source.c.github_created_at.desc()), source.c.id.desc()]
+    return _order(source, scored)
 
 
 def _ends(rows: list[Any], limit: int) -> list[Any]:

@@ -19,6 +19,7 @@ from ghlore.search.queries import (
     MACHINE_TRUST,
     MAX_HITS,
     QUERY_KINDS,
+    SORTS,
     Hit,
     ThreadView,
 )
@@ -41,6 +42,15 @@ class SearchRequest(BaseModel):
             "the default and a request can never lower it"
         ),
     )
+    repos: list[str] = Field(
+        default=[],
+        description=(
+            "narrow to these repositories. It can only ever *subtract* from the token's "
+            "scope (section 11): a name the token cannot see is dropped, not granted, so "
+            "asking for one returns nothing rather than an error. Empty means every "
+            "repository already in scope"
+        ),
+    )
     files: list[str] = []
     symbols: list[str] = []
     errors: list[str] = []
@@ -48,6 +58,13 @@ class SearchRequest(BaseModel):
     labels: list[str] = []
     since: dt.datetime | None = None
     limit: int = MAX_HITS
+    sort: str = Field(
+        default="relevance",
+        description=(
+            f"one of {list(SORTS)}. Ordering only -- it reorders the same hits relevance "
+            "would have chosen, and never changes which ones they are"
+        ),
+    )
     compact: bool = Field(
         default=False, description="shorter snippets, no score internals, for a tight budget"
     )

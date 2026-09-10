@@ -132,6 +132,15 @@ def build_app(
     @app.post("/api/v1/search")
     def search(body: SearchRequest, token: Caller) -> Response:
         repos = token.scope(deps.indexed_repos())
+        if body.repos:
+            # An INTERSECTION, never a replacement. `repos` is section 11's scope, not a
+            # user preference, so the request's list may only remove names from it. A repo
+            # the token cannot see is simply absent from the result -- which means asking
+            # for one yields an empty page rather than an error, and the caller learns
+            # nothing about what exists outside the scope it was given. Written as a filter
+            # over `repos` rather than a set intersection so the order stays the scope's.
+            wanted = set(body.repos)
+            repos = tuple(repo for repo in repos if repo in wanted)
         try:
             query = SearchQuery(
                 repos=repos,
@@ -146,6 +155,7 @@ def build_app(
                 since=body.since,
                 limit=body.limit,
                 compact=body.compact,
+                sort=body.sort,
             )
         except QueryError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
@@ -161,7 +171,11 @@ def build_app(
                 # raised floor and a genuinely quiet corpus look identical otherwise.
                 "trust_floor": list(admissible_trust(query.trust, query.kind)),
                 "limit": query.limit,
+                # The *effective* scope, after the request's own repo filter narrowed it.
+                # Filtering to a repository the token cannot see comes back as `[]`, which
+                # is what makes that empty page diagnosable rather than mysterious.
                 "repos": list(repos),
+                "sort": query.sort,
                 # The same reason as the floor: with expansion on, the question actually
                 # asked is not the string the caller sent, and an empty result is only
                 # diagnosable if the legs are visible (section 6).

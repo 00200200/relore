@@ -51,6 +51,17 @@ QUERY_KINDS = ("failure", "precedent", "rationale")
 HUMAN_TRUST = ("reported", "authoritative")
 MACHINE_TRUST = "machine"
 
+#: How a page is *ordered*. It does not change which documents are on it: section 10.6 is
+#: the record of what happens when recency decides selection -- each thread contributes its
+#: newest document, which on a merged pull request is the approving review, and a real query
+#: came back nine-tenths ``LGTM``. So ``newest`` reorders the same best-per-thread hits that
+#: ``relevance`` would have returned; it never picks different ones.
+#:
+#: Sorting is not decay. Decay (section 6) folds age into the score and can demote a correct
+#: old answer; this leaves the score alone and answers a different question -- "what has
+#: moved lately" rather than "what answers this".
+SORTS = ("relevance", "newest")
+
 
 class QueryError(ValueError):
     """A request that cannot be served as asked. Distinct from an empty result, which is
@@ -80,6 +91,7 @@ class SearchQuery:
     since: dt.datetime | None = None
     limit: int = MAX_HITS
     compact: bool = False
+    sort: str = "relevance"
 
     def __post_init__(self) -> None:
         # Section 6's error term matches the *normalized* form (section 5.3), so a caller
@@ -99,6 +111,8 @@ class SearchQuery:
             raise QueryError(f"unknown trust tier {self.trust!r}")
         if self.since is not None and self.since.tzinfo is None:
             raise QueryError("since must be timezone-aware")
+        if self.sort not in SORTS:
+            raise QueryError(f"unknown sort {self.sort!r}; one of {list(SORTS)}")
         object.__setattr__(self, "limit", max(1, min(int(self.limit), MAX_HITS)))
 
     @property

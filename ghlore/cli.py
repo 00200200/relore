@@ -74,6 +74,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="raise the floor to 'authoritative', or 'machine' to ask what our own bots said",
     )
     s.add_argument("--since", help="ISO timestamp; only documents written after it")
+    # Narrows the token's scope, never widens it -- see the server. Repeatable, so it
+    # reads like the other filters even though one name is the usual case.
+    s.add_argument(
+        "--repo",
+        action="append",
+        default=[],
+        dest="repos",
+        help="OWNER/NAME; narrow to this repository (repeatable)",
+    )
+    # Spelled out rather than imported from `search.queries`, like `--kind` above: reaching
+    # that module executes `ghlore/search/__init__.py`, which imports SQLAlchemy, and
+    # `test_module_boundary` exists to catch exactly that. The server validates the value.
+    s.add_argument(
+        "--sort",
+        choices=("relevance", "newest"),
+        default="relevance",
+        help="'newest' orders the same hits by date instead of score",
+    )
     s.add_argument("--limit", type=int, default=10)
     s.add_argument(
         "--no-expand",
@@ -151,9 +169,11 @@ def _search(args: argparse.Namespace) -> int:
             "errors": args.error,
             "tests": args.test,
             "labels": args.label,
+            "repos": args.repos,
             "since": args.since,
             "limit": args.limit,
             "compact": args.compact,
+            "sort": args.sort,
             "expand": args.expand,
             # The server renders it, so the envelope a person inspects in the web UI and
             # the one an agent reads here are the same string from the same code.
