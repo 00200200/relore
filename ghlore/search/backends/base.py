@@ -398,7 +398,9 @@ class SearchBackend(ABC):
 
     # -- one thread ------------------------------------------------------
 
-    def thread(self, repo: str, number: int, *, focus: str = "") -> ThreadView | None:
+    def thread(
+        self, repo: str, number: int, *, focus: str = "", full: bool = False
+    ) -> ThreadView | None:
         """One thread, capped (section 6).
 
         ``focus`` **orders** which comments come back and never selects them -- see
@@ -442,7 +444,18 @@ class SearchBackend(ABC):
                     .where(s.thread_links.c.source_thread_id == row.id)
                 )
             )
-            body = self._body(conn, row.id)
+            collected = int(
+                conn.execute(
+                    select(func.count(s.thread_files.c.path.distinct())).where(
+                        s.thread_files.c.thread_id == row.id,
+                        s.thread_files.c.change_type.isnot(None),
+                    )
+                ).scalar_one()
+                or 0
+            )
+            # Indexed, not `row.metadata`: `Row` shadows it.
+            changed = (row._mapping["metadata"] or {}).get("changed_files")
+            body, body_chars = self._body(conn, row.id, full=full)
             comments, total, matched = self._comments(conn, row, focus)
 
         return ThreadView(
@@ -456,25 +469,50 @@ class SearchBackend(ABC):
             age=render_age(row.created_at),
             labels=labels,
             body=body,
+            body_chars=body_chars,
+            body_truncated=len(body) < body_chars,
             comments=comments,
             files=files,
+            files_total=int(changed) if changed is not None else None,
+            files_collected=collected,
             links=links,
             total_documents=total,
             focus=focus,
             focus_matched=matched,
         )
 
-    def _body(self, conn: Any, thread_id: int) -> str:
-        text = conn.execute(
-            select(s.documents.c.body_text)
-            .where(
-                s.documents.c.thread_id == thread_id,
-                s.documents.c.source_type == "body",
-                s.documents.c.chunk_index == 0,
+    def _body(self, conn: Any, thread_id: int, *, full: bool) -> tuple[str, int]:
+        """The opening post, and how long it really is.
+
+        The cap is a token budget, not the "never returnable in full" contract: that one
+        is about the *comments*, which are unbounded -- a 200-comment argument is the case
+        section 6 exists for -- whereas a body is one document whose length is whoever
+        opened the thread. Cutting it silently is what sent a diagnosis session back to
+        ``git clone``: on ``huggingface/transformers`` the issue template spends its first
+        ~700 characters on ``### System Info`` and ``### Who can help?``, so
+        ``### Reproduction`` -- the part an agent came for -- started at almost exactly the
+        800th. So ``full`` serves all of it on request, and the truncated form now says
+        how much it is holding back.
+        """
+        chunks = (
+            conn.execute(
+                select(s.documents.c.body_text)
+                .where(
+                    s.documents.c.thread_id == thread_id,
+                    s.documents.c.source_type == "body",
+                )
+                .order_by(s.documents.c.chunk_index.asc())
             )
-            .limit(1)
-        ).scalar_one_or_none()
-        return snippet(text or "", limit=MAX_BODY_CHARS)
+            .scalars()
+            .all()
+        )
+        # Every chunk, not chunk 0: past 6,000 characters the chunker splits a body on its
+        # headings, and reading the first piece would cap `full` at a boundary the reporter
+        # never wrote. The join is the boundary it split on.
+        whole = "\n\n".join(text for text in chunks if text)
+        if full:
+            return whole, len(whole)
+        return snippet(whole, limit=MAX_BODY_CHARS), len(whole)
 
     def _comments(
         self, conn: Any, thread: Any, focus: str

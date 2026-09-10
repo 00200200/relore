@@ -11,9 +11,10 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from fake_github import FakeGitHub
+from fake_github import FakeGitHub, FakeGraphQL
 from sqlalchemy import Engine
 
+from ghlore.ingest.backfill import backfill
 from ghlore.ingest.index_thread import index_thread
 from ghlore.search import SearchQuery, open_backend
 from ghlore.search.queries import (
@@ -37,6 +38,17 @@ def _index(engine: Engine, fake: FakeGitHub, *numbers: int) -> None:
     with fake.client() as client:
         for number in numbers:
             index_thread(engine, client, fake.repo, number)
+
+
+def _backfill(engine: Engine, fake: FakeGitHub) -> None:
+    """The path that stages a merged PR's changed-file list: it comes from section 3's
+    per-PR GraphQL pass and from nowhere else."""
+    gql = FakeGraphQL(fake).client()
+    with fake.client() as client:
+        try:
+            backfill(engine, client, fake.repo, gql=gql)
+        finally:
+            gql.close()
 
 
 def _search(engine: Engine, **kwargs) -> list:
@@ -415,6 +427,59 @@ def test_a_focus_no_comment_can_match_still_returns_the_thread(
     assert view is not None
     assert view.focus_matched == 0
     assert len(view.comments) == 4
+
+
+def test_a_long_body_is_truncated_with_its_own_length_and_served_whole_on_request(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """The gap that sent a diagnosis session back to `git clone`: an issue template spends
+    its opening on environment boilerplate, so the reproduction began at the cut."""
+    fake.add_issue(1, body="System Info " * 80 + "Reproduction: pass rotary_pct=0.25")
+    _index(engine, fake, 1)
+
+    capped = open_backend(engine).thread(REPO, 1)
+    whole = open_backend(engine).thread(REPO, 1, full=True)
+
+    assert capped is not None and whole is not None
+    assert capped.body_truncated is True
+    assert capped.body_chars == len(whole.body)
+    assert "rotary_pct" not in capped.body  # the part that mattered, cut
+    assert "rotary_pct" in whole.body
+    assert whole.body_truncated is False
+
+
+def test_a_truncated_changed_file_list_carries_its_denominator(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """A short list of hits is a weak positive; a *missing entry* is read as a negative
+    fact. `huggingface/transformers#39847` changed 323 files, the per-PR pass stages the
+    first 100, and the dropped tail was the entry someone was checking."""
+    pr = fake.add_pr(
+        1, title="refactor", updated_at="2026-01-01T00:00:00Z", merged_at="2026-01-02T00:00:00Z"
+    )
+    pr.files = [f"src/m{i}/modeling_m{i}.py" for i in range(105)]
+    _backfill(engine, fake)
+
+    view = open_backend(engine).thread(REPO, 1)
+
+    assert view is not None
+    assert view.files_total == 105
+    assert view.files_collected == 100
+    assert "src/m104/modeling_m104.py" not in view.files  # and the count above says so
+
+
+def test_a_thread_with_no_changed_file_list_reports_none_rather_than_zero(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """An issue has no such list at all, which is not the same fact as "touched nothing"."""
+    fake.add_issue(1, body="see src/mod.py")
+    _index(engine, fake, 1)
+
+    view = open_backend(engine).thread(REPO, 1)
+
+    assert view is not None
+    assert view.files_total is None
+    assert view.files_collected == 0
 
 
 def test_a_missing_thread_is_none_not_an_error(engine: Engine) -> None:

@@ -141,7 +141,16 @@ def thread_json(view: ThreadView, *, compact: bool = False) -> dict[str, Any]:
         "age": view.age,
         "labels": list(view.labels),
         "body": view.body,
+        # A cap a caller cannot see is a cap a caller reads as the whole document. `full`
+        # serves the rest; these two say whether there is a rest.
+        "body_chars": view.body_chars,
+        "body_truncated": view.body_truncated,
         "files": list(view.files),
+        # The denominator of the changed-file list. A truncated list must never be able to
+        # answer a membership question: `files_collected < files_total` means a path that
+        # is absent here may still have been touched.
+        "files_total": view.files_total,
+        "files_collected": view.files_collected,
         "links": [dict(link) for link in view.links],
         # Named so the cap is visible in the response rather than inferred from a short
         # list: a caller that cannot tell truncation from a quiet thread will read ten

@@ -191,6 +191,20 @@ def test_thread_focus_ranks_the_answering_comment_first(wired, engine, fake, cap
     assert "carry every term" in out
 
 
+def test_thread_full_serves_the_body_the_cap_was_hiding(wired, engine, fake, capsys) -> None:
+    """The cap is a token budget, not a fact about the thread: a caller who has decided it
+    needs the reproduction must be able to ask for it (huggingface/ghlore#5)."""
+    fake.add_issue(1, body="System Info " * 80 + "Reproduction: pass rotary_pct=0.25")
+    _index(engine, fake, 1)
+
+    capped = _run(capsys, "thread", "1")
+    whole = _run(capsys, "thread", "1", "--full")
+
+    assert "rotary_pct" not in capped
+    assert "body truncated" in capped and "--full" in capped
+    assert "rotary_pct" in whole
+
+
 def test_status_names_the_backend(wired, engine, capsys) -> None:
     """Section 4.1: a surprising result set should be diagnosable rather than mysterious."""
     out = _run(capsys, "status")

@@ -199,6 +199,7 @@ def build_app(
         focus: str = "",
         compact: bool = False,
         render: bool = False,
+        full: bool = False,
     ) -> Response:
         """One thread, capped (section 6). ``repo`` is optional only while a token's scope
         holds exactly one repository -- with several, a bare number is ambiguous and
@@ -214,7 +215,7 @@ def build_app(
         if repo not in repos:
             # 404, not 403: whether a repository exists is not this token's business.
             raise HTTPException(status_code=404, detail=f"{repo}#{number} not found")
-        view = deps.backend.thread(repo, number, focus=focus)
+        view = deps.backend.thread(repo, number, focus=focus, full=full)
         if view is None:
             raise HTTPException(status_code=404, detail=f"{repo}#{number} not found")
         payload = {"notice": NOTICE, "thread": thread_json(view, compact=compact)}

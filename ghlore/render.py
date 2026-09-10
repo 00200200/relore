@@ -87,14 +87,20 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
         lines.append(f"opened by @{thread['author']}")
     if thread.get("labels"):
         lines.append(f"labels: {', '.join(thread['labels'])}")
-    if thread.get("files"):
-        lines.append(f"files: {', '.join(thread['files'])}")
+    lines += _file_lines(thread)
     if thread.get("links"):
         lines.append(
             "links: "
             + ", ".join(f"{link['relationship']} #{link['target']}" for link in thread["links"])
         )
-    lines += ["", thread.get("body", ""), ""]
+    lines += ["", thread.get("body", "")]
+    if thread.get("body_truncated"):
+        lines.append(
+            f"(body truncated: {len(thread.get('body') or '')} of "
+            f"{thread.get('body_chars')} characters. `--full` serves the rest, which on an "
+            "issue template is where the reproduction starts.)"
+        )
+    lines.append("")
 
     returned, total = thread.get("comments_returned", 0), thread.get("comments_total", 0)
     focus, matched = thread.get("focus") or "", thread.get("focus_matched")
@@ -113,6 +119,43 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
             + ")"
         )
     return envelope("\n".join(lines).rstrip(), source=thread.get("url"))
+
+
+def _file_lines(thread: dict[str, Any]) -> list[str]:
+    """The changed-file list, with its denominator.
+
+    A short list of *hits* is read as a weak positive; a *missing entry* is read as a
+    negative fact. ``huggingface/transformers#39847`` is the case this exists for: 323
+    changed files, 105 in the index because the per-PR pass takes the first 100, and no
+    ``gpt_neox`` entry among them. The pull request does touch ``gpt_neox_japanese``, so
+    the absence would have exonerated the change that caused the bug being diagnosed.
+
+    So a truncated list must never be able to answer a membership question silently. The
+    three sources also differ in kind: the per-PR pass's list is definitive, while a path
+    named in prose is an extraction, and only the first is counted against the total.
+    """
+    files = thread.get("files") or []
+    total, collected = thread.get("files_total"), thread.get("files_collected") or 0
+    if not files and total is None:
+        return []
+    if total is None:
+        note = " named in the discussion (this thread has no changed-file list)"
+    elif collected >= total:
+        note = f" ({collected} of {total} changed files: complete)"
+    elif collected:
+        note = (
+            f" ({collected} of {total} changed files collected. TRUNCATED: a path that is "
+            "absent here may still have been touched)"
+        )
+    else:
+        note = (
+            f" named in the discussion. This pull request's {total} changed files are not "
+            "collected, so absence here is not evidence"
+        )
+    lines = [f"files: {len(files)}{note}"]
+    if files:
+        lines.append("  " + ", ".join(files))
+    return lines
 
 
 def render_status(payload: dict[str, Any]) -> str:

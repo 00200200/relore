@@ -105,10 +105,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="ask exactly one question instead of section 6's fan-out over the legs",
     )
 
-    t = sub.add_parser("thread", help="one thread, comments selected by relevance")
+    t = sub.add_parser("thread", help="one thread, comments ranked by relevance")
     t.add_argument("number", type=int)
-    t.add_argument("--focus", default="", help="select the comments that answer this")
+    t.add_argument("--focus", default="", help="rank the comments by this, best first")
     t.add_argument("--repo", help="OWNER/NAME; needed when the token can see several")
+    t.add_argument(
+        "--full",
+        action="store_true",
+        help="serve the opening post whole instead of its first 800 characters",
+    )
 
     pr = sub.add_parser("precedent", help="completed units of work and what they consisted of")
     pr.add_argument("--kind")
@@ -197,6 +202,7 @@ def _thread(args: argparse.Namespace) -> int:
         "focus": args.focus,
         "compact": str(args.compact).lower(),
         "render": str(not args.json).lower(),
+        "full": str(args.full).lower(),
     }
     if args.repo:
         query["repo"] = args.repo

@@ -172,7 +172,21 @@ class ThreadView:
     labels: tuple[str, ...]
     body: str
     comments: tuple[Hit, ...]
+    #: The opening post's full length, and whether ``body`` is a window onto it. A body
+    #: cut at :data:`MAX_BODY_CHARS` with no marker is the gap that sent a diagnosis
+    #: session back to ``git clone``: an issue template spends its first ~700 characters
+    #: on environment boilerplate, so ``### Reproduction`` began at almost exactly the cut.
+    body_chars: int = 0
+    body_truncated: bool = False
     files: tuple[str, ...] = ()
+    #: The changed-file list's denominator. ``files`` mixes three sources -- the per-PR
+    #: pass's definitive list, an inline comment's own path, and paths named in prose --
+    #: and the definitive part is taken 100 at a time, so it is routinely a subset. A
+    #: *missing* entry in a list is read as a negative fact, and on
+    #: ``huggingface/transformers#39847`` (323 changed files, 105 indexed) that absence
+    #: would have exonerated the pull request that caused the bug being diagnosed.
+    files_total: int | None = None
+    files_collected: int = 0
     links: tuple[dict[str, Any], ...] = ()
     total_documents: int = 0
     #: What ``focus`` asked, and how many comments carry *every* one of its terms. A focus

@@ -25,6 +25,11 @@ def account(login: str, *, bot: bool = False) -> dict[str, Any]:
     return {"login": login, "id": abs(hash(login)) % 10**6, "type": "Bot" if bot else "User"}
 
 
+#: ``files(first: N)`` / ``commits(first: N)`` in ``github/graphql.py``. Duplicated rather
+#: than imported so the fixture describes GitHub, not our own constant.
+_GRAPHQL_PAGE = 100
+
+
 @dataclass
 class FakeThread:
     number: int
@@ -342,10 +347,14 @@ class FakeGraphQL:
                     "nodes": [_as_graphql_review(r) for r in thread.reviews],
                 },
                 "files": {
+                    # `first: 100`, honoured: the query asks for a page and reports the
+                    # whole count, so a 323-file refactor stages 100 rows and a
+                    # `totalCount` that says so. Serving every node here would hide the
+                    # only interesting thing about a large pull request.
                     "totalCount": len(thread.files),
                     "nodes": [
                         {"path": p, "additions": 1, "deletions": 0, "changeType": "MODIFIED"}
-                        for p in thread.files
+                        for p in thread.files[:_GRAPHQL_PAGE]
                     ],
                 },
                 "commits": {

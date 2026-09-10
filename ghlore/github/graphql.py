@@ -31,11 +31,22 @@ ENDPOINT = "https://api.github.com/graphql"
 # single failure more expensive; lower wastes the fixed per-request cost.
 BATCH = 25
 
-# `files` and `commits` are capped rather than paged. A PR with more than 100 changed
-# files is nearly always a bulk rename or a vendored-dependency bump, and its file list is
-# not evidence about anything a query would ask for -- so truncation here costs nothing we
-# want, and paging every such PR would cost points we need elsewhere. `truncated_*` on the
-# stored node records that it happened, so a later pass can revisit if it ever matters.
+# `files` and `commits` are capped rather than paged, and the cap is a budget decision:
+# paging every large PR costs points this pass does not have (section 3).
+#
+# **The original reasoning for it was wrong, and the measurement is worth keeping.** It
+# said a PR with more than 100 changed files is nearly always a bulk rename whose file
+# list is not evidence. On `huggingface/transformers` a 323-file sweeping refactor that
+# regresses one model is the *normal* shape of the interesting change:
+# `huggingface/transformers#39847` touches 323 files, this pass staged 105, and the 218 it
+# dropped included every `gpt_neox*` path -- which is exactly the entry someone was
+# checking when they asked whether that PR caused the bug. So the field is most wrong
+# where it is most needed.
+#
+# What follows from that is *reporting*, not a bigger page: `truncated_*` is on the stored
+# node, `threads.metadata.changed_files` carries the true count, and the thread view now
+# serves both so an absent path cannot be read as a negative fact. Lifting the cap is a
+# section 3 budget question and belongs in the plan, not here.
 PAGE = 100
 
 _PR_FIELDS = f"""
