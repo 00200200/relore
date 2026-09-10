@@ -303,9 +303,11 @@ def _call(
 
     base = args.api or os.environ.get(API_ENV) or DEFAULT_API
     headers = {"accept": "application/json"}
-    token = next((os.environ[e] for e in TOKEN_ENVS if os.environ.get(e)), None)
-    if token:
-        headers["authorization"] = f"Bearer {token}"
+    # The *name* too, not just the value: a 401 has to say which variable was rejected,
+    # and there are two it could have come from.
+    sent_from = next((e for e in TOKEN_ENVS if os.environ.get(e)), None)
+    if sent_from:
+        headers["authorization"] = f"Bearer {os.environ[sent_from]}"
 
     try:
         response = httpx.request(
@@ -324,6 +326,15 @@ def _call(
         ) from None
 
     if response.status_code == 401:
+        # Two failures, not one. Telling an operator who has already exported a token to
+        # export a token sends them looking for a typo in the value, when the usual cause
+        # is that the value is fine and belongs to a different daemon.
+        if sent_from:
+            raise SystemExit(
+                f"ghlore: {base} rejected the token in {sent_from}. A token is only valid "
+                f"on the daemon whose GHLORE_API_TOKENS lists it, so one minted for "
+                f"another deployment will not work here."
+            )
         raise SystemExit(
             f"ghlore: {base} requires a token. Set {TOKEN_ENVS[0]} to one scoped to your "
             "repositories."
