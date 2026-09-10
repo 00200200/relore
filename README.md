@@ -12,7 +12,9 @@ queryable.
 ## Try it
 
 ```bash
-pip install ghlore                     # the client: an HTTP client, nothing else
+# No PyPI release yet, so install from main -- `pip install ghlore` would fetch
+# whatever else owns that name.
+pip install git+https://github.com/huggingface/ghlore
 export GHLORE_API=https://your-ghlore  # a running `ghlored serve`
 export GHLORE_TOKEN=…                  # if that daemon requires one
 
@@ -122,8 +124,9 @@ thin.
 ## Quickstart
 
 ```bash
-pip install ghlore                    # client only
-pip install 'ghlore[postgres]'        # the daemon
+GH=git+https://github.com/huggingface/ghlore   # no PyPI release yet; install from main
+pip install $GH                       # client only
+pip install "ghlore[postgres] @ $GH"   # the daemon
 
 # server side
 export GHLORE_DATABASE_URL=postgresql://localhost/ghlore   # or sqlite:///ghlore.db, dev only
@@ -157,6 +160,8 @@ export GHLORE_TOKEN=tok_agent                # only if the daemon requires one
 # file and symbol legs and merges them. See docs/cli.md.
 ghlore search "optional mask dtype" --limit 5
 ghlore search "repeat guard" --trust authoritative   # only what a maintainer settled
+ghlore search "poll wedged" --repo owner/name        # narrow the token's scope
+ghlore search "flaky teardown" --sort newest         # same hits, most recent first
 ghlore search "$(cat failure.txt)"                   # a whole traceback is one call
 ghlore search "optional mask dtype" --no-expand      # ask exactly one question
 ghlore thread 12345 --focus "optional mask"
@@ -225,11 +230,20 @@ Two things every integration must get right:
 
 ## Ranking
 
-**Not built yet — this section is the design.** Today retrieval is full text, filters, the
-trust floor and §6's **query expansion**; every hit carries its score, so the term that is
-wrong is visible in the web UI. The weights below are what is left of milestone 3, and they
-land *after* the evaluation set: a weight fitted by eye is a weight nobody can argue with
-later, and a recall number is only comparable against the backend that produced it.
+**Built.** Retrieval is full text, filters, the trust floor, §6's **query expansion** and
+§6's **weighted score**, gated on the evaluation set below rather than fitted by eye — a
+weight chosen by hand is one nobody can argue with later. Every hit carries its score
+broken down by term, so the term that is wrong is visible in the web UI.
+
+Two things that ride alongside the score rather than in it:
+
+- **`--sort newest`** reorders a page by date without re-selecting it. Selection stays on
+  relevance, because letting recency choose a thread's representative document is a
+  measured bug: it picks the sign-off (§10.6, §10.7).
+- **Decay is written and gated off** (`ranking.DECAY_ENABLED`). Its release condition — a
+  full-history backfill — was met on 2026-09-09, but §10.5's numbers were measured on a
+  frozen six-month set that refuses new labels, so turning it on honestly needs new ground
+  truth first. The gate now records a measurement not yet taken.
 
 Lexical and structural: exact evidence outranks topical similarity.
 

@@ -34,10 +34,15 @@ from ghlore.render import render_search, render_status, render_thread
 
 API_ENV = "GHLORE_API"
 TOKEN_ENVS = ("GHLORE_TOKEN", "GHLORE_API_TOKEN")
-# The deployed daemon, so an agent that was handed nothing still reaches an index. It is
-# on an internal ALB, so this default works on the VPN and nowhere else -- which is the
-# right way round: a wrong answer from an empty local daemon is worse than a refusal.
-DEFAULT_API = "https://ghlore.huggingface.tech"
+# Localhost, until the deployment has a name that resolves. `ghlore.huggingface.tech` is
+# where this is going and it was briefly the default here -- but there is no
+# `*.huggingface.tech` ACM certificate, so the ALB controller refuses to build a load
+# balancer at all (`FailedBuildModel: no certificate found for host`) and the name has no
+# DNS record. A default nobody can reach is worse than one that is merely often wrong: a
+# connection refused on localhost tells you to start a daemon, whereas a DNS failure on a
+# hostname you never typed tells you nothing you can act on. Point this at the deployment
+# when the certificate lands -- build plan section 15.4 tracks it.
+DEFAULT_API = "http://localhost:8080"
 
 _MILESTONE = {"precedent": 4, "why": 4, "map": 2, "defs": 2, "refs": 2}
 
@@ -341,8 +346,9 @@ def _call(
     except httpx.HTTPError as exc:
         raise SystemExit(
             f"ghlore: cannot reach {base} ({exc.__class__.__name__}). "
-            f"The default is the deployed daemon, which is reachable on the VPN only — "
-            f"connect, or set {API_ENV} to your own, or start `ghlored serve`."
+            f"Start `ghlored serve`, or set {API_ENV} — the deployed daemon has no DNS "
+            f"name yet, so reaching it means "
+            f"`kubectl -n ghlore port-forward deploy/ghlore 8080:8080`."
         ) from None
 
     if response.status_code == 401:
