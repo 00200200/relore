@@ -50,11 +50,14 @@ def render_search(payload: dict[str, Any], *, compact: bool = False) -> str:
 
     body = [*header, ""]
     for index, hit in enumerate(hits, start=1):
-        body += _hit_lines(index, hit, compact=compact)
+        body += _hit_lines(index, hit)
     return envelope("\n".join(body).rstrip())
 
 
-def _hit_lines(index: int, hit: dict[str, Any], *, compact: bool) -> list[str]:
+def _hit_lines(index: int, hit: dict[str, Any]) -> list[str]:
+    """One hit. ``compact`` does not reach here: it shortens the snippet server-side and
+    drops the score breakdown from the JSON, and the score is no longer rendered at all.
+    """
     tier = TRUST_LABEL.get(str(hit.get("trust")), str(hit.get("trust")))
     head = (
         f"{index}. {hit.get('repo')}#{hit.get('number')} {hit.get('type')}  "
@@ -118,7 +121,7 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
             head += f" ({matched} of {total} carry every term)"
     lines.append(head + " --")
     for index, comment in enumerate(thread.get("comments") or [], start=1):
-        lines += _hit_lines(index, comment, compact=compact)
+        lines += _hit_lines(index, comment)
     if total > returned:
         lines.append(
             f"({total - returned} not shown: a thread is never returnable in full."
