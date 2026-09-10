@@ -176,8 +176,10 @@ _PAGE = """
 
       <h3>The CLI</h3>
       <p>The base install is a read-only HTTP client — no database driver, no parser —
-         so it is safe to drop into a constrained agent sandbox.</p>
-      <pre id="cli-setup">pip install ghlore</pre>
+         so it is safe to drop into a constrained agent sandbox. It installs from
+         <code>main</code>, not from PyPI: there is no release yet, so
+         <code>pip install ghlore</code> would fetch whatever else owns that name.</p>
+      <pre id="cli-setup">pip install git+https://github.com/huggingface/ghlore</pre>
       <pre>ghlore search "AttributeError: 'NoneType' object has no attribute 'shape'" --kind failure
 ghlore search "why is this cast here" --kind rationale --file src/transformers/masking_utils.py
 ghlore thread 47720 --focus "cropping"
@@ -322,7 +324,7 @@ $("#samples").addEventListener("click", (event) => {
 
 // The setup lines name *this* daemon, so they can be pasted without editing.
 $("#cli-setup").textContent =
-  `pip install ghlore\nexport GHLORE_API=${location.origin}` +
+  `pip install git+https://github.com/huggingface/ghlore\nexport GHLORE_API=${location.origin}` +
   `\nexport GHLORE_TOKEN=<your token>   # only if this daemon requires one`;
 $("#agent-snippet").textContent =
   `## Project history\n\n` +

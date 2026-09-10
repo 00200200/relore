@@ -34,7 +34,10 @@ from ghlore.render import render_search, render_status, render_thread
 
 API_ENV = "GHLORE_API"
 TOKEN_ENVS = ("GHLORE_TOKEN", "GHLORE_API_TOKEN")
-DEFAULT_API = "http://localhost:8080"
+# The deployed daemon, so an agent that was handed nothing still reaches an index. It is
+# on an internal ALB, so this default works on the VPN and nowhere else -- which is the
+# right way round: a wrong answer from an empty local daemon is worse than a refusal.
+DEFAULT_API = "https://ghlore.huggingface.tech"
 
 _MILESTONE = {"precedent": 4, "why": 4, "map": 2, "defs": 2, "refs": 2}
 
@@ -46,7 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--compact", action="store_true", help="trim snippets for a tight context budget"
     )
-    p.add_argument("--api", default=None, help=f"the ghlored base URL (default: ${API_ENV})")
+    p.add_argument(
+        "--api",
+        default=None,
+        help=f"the ghlored base URL (default: {API_ENV}, else {DEFAULT_API})",
+    )
     sub = p.add_subparsers(dest="verb", required=True)
 
     s = sub.add_parser("search", help="search the indexed issue/PR history")
@@ -312,7 +319,8 @@ def _call(
     except httpx.HTTPError as exc:
         raise SystemExit(
             f"ghlore: cannot reach {base} ({exc.__class__.__name__}). "
-            f"Set {API_ENV}, or start `ghlored serve`."
+            f"The default is the deployed daemon, which is reachable on the VPN only — "
+            f"connect, or set {API_ENV} to your own, or start `ghlored serve`."
         ) from None
 
     if response.status_code == 401:
