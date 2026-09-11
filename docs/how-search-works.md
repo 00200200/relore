@@ -1,7 +1,7 @@
 # How the search works
 
 *What kind of index this is, what goes into it, and what it is better and worse at than the
-two tools you already have.*
+tools it sits next to: `grep`, a semantic index, and Funes.*
 
 ## TL;DR
 
@@ -23,6 +23,9 @@ index and it is not grep.
   and its age.
 - `documents.embedding vector(384)` exists in the schema and **nothing writes it**. Vector
   search is a v2 option, not a shipped feature.
+
+If what you want is a *semantic* index of what **your own agent** did last week, that is a
+different tool and it exists: see [Funes](#versus-funes) below.
 
 The daemon says which of these it can do rather than asking you to trust a document:
 
@@ -185,6 +188,51 @@ reviewer's finding is itself a document in the answer's own thread, which flatte
 index and nothing else. The leak-free rows are the ones worth quoting, and on the first of
 them this is level with GitHub search rather than ahead of it.
 
+## Versus Funes
+
+[Funes](https://huggingface.co/blog/funes) (`github.com/huggingface/funes`) is the hybrid
+semantic system in this house, and the comparison is worth making carefully, because the
+interesting difference is **not** the retrieval stack. It is *whose memory it is*.
+
+Funes indexes **coding-agent session traces** — how an agent searched, what it tried, the
+errors it hit, where it changed direction — parsed from Claude Code, Codex, pi and Hermes
+into one shape, chunked, and retrieved with **vector search and BM25 fused, then reranked
+with a cross-encoder**, embedding and reranking on your own machine, into a local Lance
+dataset you can optionally publish as a private Hugging Face dataset. Agents call `recall`;
+people call `funes ask`. It is append-only by design: recording what your agent did is the
+entire point.
+
+`ghlore` indexes **what people decided in public** — issues, pull requests, reviews, inline
+review comments — and has no write path at all. Not "we have not built one": there is no
+`remember` verb and there will not be one, because an agent's conclusion becoming evidence
+the *next* agent retrieves is the failure this corpus exists to avoid. Authorship is what
+makes a hit worth anything here — `[authoritative]` means someone with write access said
+it — and a corpus anyone's agent can write to has no authorship to check.
+
+That is a difference in purpose, not a criticism in either direction. In your own session
+history a wrong turn is still useful: *I tried that and it did not work* is exactly what you
+want back tomorrow. In a shared corpus of a project's decisions, the same row is
+contamination.
+
+| | `ghlore` | Funes |
+| --- | --- | --- |
+| remembers | what the project decided | what your agent did |
+| authored by | humans, with write-access standing attached; bots labelled and excluded by default | your agent, by construction |
+| retrieval | lexical full-text + exact signal filters + a weighted score | vector + BM25 fused, cross-encoder rerank |
+| recency | decay implemented and **off** — for a rationale question the oldest thread is often the answer | 30-day half-life by default |
+| where it runs | one shared Postgres service, thin client, read-only | local by default; optional shared HF dataset, secret-scanned on publish |
+| writes | nothing, ever | append-only, that is the point |
+| scale quoted | 48k threads / 466k documents, ~5-minute freshness | 19,195 sessions / 308k chunks, ~2h03m to index on an M4 Pro, 6.3 s per query |
+
+**They compose, and the pairing is the actual recommendation.** Funes answers *have I been
+here before*; `ghlore` answers *has the project been here before*. An agent that asks both
+before writing a patch knows what it already tried and what the maintainers already settled
+— which are different facts, held in different places, for different reasons.
+
+No head-to-head number exists and none is meaningful: the two index different corpora, so
+the hit rates in each write-up measure different questions. Treat the scale figures above as
+shape, not as a race.
+
 ## When to reach for which
 
 | question | tool |
@@ -195,6 +243,7 @@ them this is level with GitHub search rather than ahead of it.
 | "is somebody already fixing this?" | `ghlore inflight <n>` |
 | "what did the maintainer say in that thread?" | `ghlore thread <n> --focus "<what you care about>"` |
 | "find me something worded completely differently" | neither, today — see above |
+| "have I already tried this, in an earlier session?" | [Funes](https://huggingface.co/blog/funes), not this |
 
 ## Known limits, stated plainly
 

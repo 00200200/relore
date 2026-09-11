@@ -10,6 +10,15 @@
   loop is agent-*authored* memory where `ghlore` has no write path, and it is a
   per-developer local daemon on ~2 GB of `torch` where this is a shared service with a thin
   client. If what you want is "my agent should remember yesterday", use theirs.
+- **[Funes](https://huggingface.co/blog/funes)** (`huggingface/funes`) — durable memory of
+  **agent session traces**: vector + BM25 fused and cross-encoder reranked, embedded on your
+  own machine into a Lance dataset, optionally published as a private HF dataset.
+  Complementary rather than competing, and the cleanest illustration of this project's third
+  invariant: Funes is append-only *because* recording what your agent did is the point, while
+  `ghlore` has no write path *because* a shared corpus of a project's decisions is worth
+  something only while every row has a human author you can check. Funes answers "have I been
+  here before"; this answers "has the project been here before". See
+  [`how-search-works.md`](how-search-works.md#versus-funes).
 - **`yksanjo/gmem`** — agent-authored memory for a Solana workspace. Different corpus;
   worth reading for its append-only `(kind, natural_id, version)` entity model.
 
