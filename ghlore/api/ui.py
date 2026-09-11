@@ -192,8 +192,13 @@ _PAGE = """
       <pre id="cli-setup">pip install git+https://github.com/huggingface/ghlore</pre>
       <pre>ghlore search "AttributeError: 'NoneType' object has no attribute 'shape'" --kind failure
 ghlore search "why is this cast here" --kind rationale --file src/transformers/masking_utils.py
-ghlore thread 47720 --focus "cropping"
+ghlore inflight 48630 --repo huggingface/transformers
+ghlore thread 47720 --focus "cropping" --repo huggingface/transformers
 ghlore status</pre>
+      <p><code>--repo</code> is required on a bare number whenever your token can see more
+         than one repository — a number alone would be ambiguous, and guessing would
+         silently answer about the wrong project. The error lists the repositories the
+         token can see.</p>
       <p><code>--compact</code> trims snippets for a tight context budget. A client may
          ask for less; never for more.</p>
 

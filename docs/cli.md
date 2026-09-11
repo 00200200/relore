@@ -140,6 +140,13 @@ starts after it.
 ghlore thread 48630 --full            # the whole opening post, reproduction included
 ```
 
+**`--repo` is required on a bare number when your token can see more than one
+repository.** The deployed daemon's tokens see two, so `ghlore thread 47720` there answers
+`400: pass repo=: this token can see ['huggingface/serge', 'huggingface/transformers']`.
+That is deliberate — a number alone is ambiguous and guessing would silently answer about
+the wrong project — and the message lists what to choose from. `search` needs no `--repo`
+because it spans the token's whole scope by design.
+
 ## "Is somebody already fixing this?"
 
 Ask it **before** diagnosing. It is one hop through the `Fixes|Closes|Resolves #N` edge,
