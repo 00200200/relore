@@ -111,6 +111,22 @@ poll:
 # leaves this empty has reintroduced what section 11 refused.
 botAccounts: []
 
+# How the API is reached, and by whom.
+api:
+  # `--trust-network`: serve with no bearer token because the only route to this port is
+  # a private network. **Off in the chart**, on in a deployment that has one, and that
+  # asymmetry is the point: a release which loses its token configuration must refuse to
+  # start rather than start open, so the permission is a values decision somebody typed.
+  #
+  # What it trades is narrow. Every response is read-only (section 11: the API's
+  # connection is SELECT-only on both dialects), and the corpus is public GitHub history,
+  # so the confidentiality being given up is one the source data never had. The write --
+  # section 8's labelling -- is still gated on a configured path.
+  #
+  # When it is on, `GHLORE_API_TOKENS` is emptied in the pod spec, so a stale token in
+  # the secret store cannot quietly put authentication back.
+  trustNetwork: false
+
 # Section 8's relevance judgements, which section 15 calls the one thing only real
 # use can produce. A PVC rather than an emptyDir so a pod restart does not discard
 # what somebody spent an afternoon labelling.

@@ -17,9 +17,17 @@ for section 8's benchmark labelling. Repository names contain no colon, so the g
 unambiguous. ``GHLORE_API_TOKENS_FILE`` points at a file with the same content, for a
 deployment that mounts secrets rather than exporting them.
 
-**No tokens configured means no authentication**, which is only allowed on a loopback
-bind: see :func:`ghlore.api.server.build_app`. A laptop should not have to mint a token to
-look at its own index; a network-reachable daemon must.
+**No tokens configured means no authentication**, which is allowed on a loopback bind, or
+on a wider one only when ``ghlored serve --trust-network`` says the network in front of the
+process is the perimeter -- see :func:`ghlore.api.server.serve`. A laptop should not have to
+mint a token to look at its own index; a daemon on a *public* network must.
+
+One consequence worth stating rather than discovering: :meth:`Authenticator.authenticate`
+grants the anonymous caller :data:`LABEL_SCOPE`, so an open daemon with
+``GHLORE_LABELS_PATH`` set accepts section 8's labelling from anyone who can reach it.
+Nothing retrieves those labels (section 11's actual property), so the exposure is a
+polluted evaluation set rather than a poisoned index -- but it is the one thing an open
+bind widens beyond reads.
 """
 
 from __future__ import annotations

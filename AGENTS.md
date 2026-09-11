@@ -258,6 +258,10 @@ The API's connection is read-only on both dialects — a `SELECT`-only role on P
 §8's relevance judgement to a JSONL file so §10's evaluation set is a byproduct of use
 rather than a chore nobody schedules. It is gated on a token scope and a configured path,
 it never touches `documents`, and **nothing retrieves it** — which is the actual invariant.
+On an open daemon (`--trust-network`) the anonymous caller holds that scope, so the gate is
+the configured path alone: the exposure is a polluted evaluation set, never a poisoned
+index, and the distinction is exactly why "nothing retrieves it" is the property and the
+scope is only the mechanism.
 "An agent cannot write" is the mechanism; "no agent conclusion becomes evidence" is the
 property. If you are ever tempted to make labels searchable, that is the line.
 
@@ -315,7 +319,9 @@ ghlored sample --repo owner/name --since 2026-03-01 --kind issue
 ghlored sample --repo owner/name --since 2026-06-01 --kind pr --merged
 ghlored authority --repo owner/name                # else every MEMBER stays `reported`
 ghlored serve --allow-sqlite                       # refuses SQLite without the flag
-# no GHLORE_API_TOKENS set => loopback only, and it will not bind anything else
+# no GHLORE_API_TOKENS set => loopback only, unless --trust-network says the network in
+# front of the process is the perimeter (which is how the deployment runs: Tailscale-only,
+# internal load balancer, read-only responses over public GitHub history)
 # GHLORE_API is not optional here: the client's default is the deployment.
 GHLORE_API=http://localhost:8080 ghlore search "some error text"
 ```

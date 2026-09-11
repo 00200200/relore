@@ -209,7 +209,8 @@ def build_app(
         if repo is None:
             if len(repos) != 1:
                 raise HTTPException(
-                    status_code=400, detail=f"pass repo=: this token can see {list(repos)}"
+                    status_code=400,
+                    detail=f"pass repo=: more than one repository is in scope {list(repos)}",
                 )
             return repos[0]
         if repo not in repos:
@@ -313,7 +314,9 @@ def build_app(
 
     @app.get("/", response_class=HTMLResponse)
     def home() -> Response:
-        return HTMLResponse(ui.page())
+        # The daemon's own answer, not a guess from a 401: with no tokens configured the
+        # page hides every mention of one (huggingface/ghlore, the Tailscale deployment).
+        return HTMLResponse(ui.page(auth_required=not deps.auth.open))
 
     return app
 
@@ -388,7 +391,9 @@ def _prometheus(deps: Deps) -> str:
     return "\n".join(lines) + "\n"
 
 
-def serve(url: str, *, host: str, port: int, allow_sqlite: bool) -> int:
+def serve(
+    url: str, *, host: str, port: int, allow_sqlite: bool, trust_network: bool = False
+) -> int:
     """Section 4.1's second guardrail, and the loopback rule.
 
     ``ghlored serve`` refuses a SQLite URL without ``--allow-sqlite``: a laptop index
@@ -396,6 +401,21 @@ def serve(url: str, *, host: str, port: int, allow_sqlite: bool) -> int:
     no tokens configured refuses to bind anywhere but loopback -- a laptop should not have
     to mint a token to read its own index, but an open index on a network is not a
     default anyone chose.
+
+    ``trust_network`` is how that second rule is *answered* rather than removed: it says
+    the network in front of this process is the perimeter, which is true when the only
+    route to it is a private overlay (the deployment reaches callers over Tailscale, and
+    the load balancer is internal). Two properties make that a reasonable trade rather
+    than a hole, and both are section 11: every response is read-only, so an unauthorized
+    reader cannot change the index, and the corpus is public GitHub history, so the
+    confidentiality being traded away is a property the source data never had. What
+    remains worth protecting is the *write* -- and section 8's labelling still needs
+    :data:`GHLORE_LABELS_PATH` to be configured at all.
+
+    It is a flag rather than an inference from "no tokens configured" on purpose: the
+    default must stay fail-closed, so that a deployment which *loses* its token
+    configuration refuses to come up instead of coming up open. Someone has to have typed
+    this.
     """
     import uvicorn
 
@@ -411,14 +431,24 @@ def serve(url: str, *, host: str, port: int, allow_sqlite: bool) -> int:
         )
 
     auth = Authenticator.from_env()
-    if auth.open and host not in ("127.0.0.1", "::1", "localhost"):
+    loopback = host in ("127.0.0.1", "::1", "localhost")
+    if auth.open and not loopback and not trust_network:
         engine.dispose()
         raise SystemExit(
             f"ghlored serve: no tokens configured, so refusing to bind {host}. "
-            "Set GHLORE_API_TOKENS, or bind 127.0.0.1."
+            "Set GHLORE_API_TOKENS, or bind 127.0.0.1 — or pass --trust-network if the "
+            "only route to this port is a private network you control."
         )
     if auth.open:
-        log.warning("no GHLORE_API_TOKENS configured: anyone who can reach %s may read", host)
+        # WARNING, not INFO, even when it was asked for: the one line that says an
+        # unauthenticated index is reachable should be visible at the level a deployment
+        # actually logs at.
+        log.warning(
+            "no GHLORE_API_TOKENS configured: anyone who can reach %s:%s may read this index%s",
+            host,
+            port,
+            " (--trust-network: the network is the perimeter)" if not loopback else "",
+        )
 
     labels = os.environ.get(LABELS_ENV)
     app = build_app(engine, auth=auth, labels_path=Path(labels) if labels else None)

@@ -146,6 +146,9 @@ ghlored bench --repo owner/name --set benchmarks/owner-name.jsonl \
 
 # serving. One token per consumer, each scoped to repositories:
 #   secret:repos[:scopes]   repos is a comma list or *, scopes adds `label` for the UI
+# Or none at all, when a private network is the perimeter: `serve --trust-network` binds
+# wide with no tokens, which is how the deployment runs. Without either, serve refuses to
+# bind anything but loopback — the default fails closed.
 export GHLORE_API_TOKENS="tok_agent:owner/name tok_ui:*:label"
 export GHLORE_LABELS_PATH=./labels.jsonl     # enables the UI's relevance labelling
 ghlored serve --port 8080 --host 0.0.0.0
@@ -153,9 +156,11 @@ ghlored serve --port 8080 --host 0.0.0.0
 # refuses outright unless you pass --allow-sqlite.
 
 # client side. `ghlore` defaults to the deployment, https://ghlore.huggingface.tech,
-# which is VPN-internal — set GHLORE_API to point it at your own daemon instead.
+# which is reachable over the private network only and needs no token — the network is
+# the perimeter there (`serve --trust-network`), and responses are read-only over public
+# GitHub history. Set GHLORE_API to point it at your own daemon instead.
 export GHLORE_API=http://localhost:8080
-export GHLORE_TOKEN=tok_agent                # only if the daemon requires one
+export GHLORE_TOKEN=tok_agent                # only if that daemon requires one
 # A query is an AND of every content term, so two or three distinctive ones beat a
 # sentence. A pasted traceback works too: section 6's expansion fans it out into error,
 # file and symbol legs and merges them. See docs/cli.md.

@@ -110,7 +110,10 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument(
         "--host",
         default="127.0.0.1",
-        help="loopback by default; binding wider needs GHLORE_API_TOKENS (default: 127.0.0.1)",
+        help=(
+            "loopback by default; binding wider needs GHLORE_API_TOKENS or "
+            "--trust-network (default: 127.0.0.1)"
+        ),
     )
     # SQLite is a development affordance, not a deployment: it has no trigram or vector
     # tier and scores with bm25 rather than ts_rank_cd, so an index served from one makes
@@ -119,6 +122,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-sqlite",
         action="store_true",
         help="serve from a SQLite database anyway (development only, never production)",
+    )
+    # The loopback rule, answered rather than removed. Read-only and a public corpus is
+    # what makes it a reasonable trade; see `api.server.serve`.
+    q.add_argument(
+        "--trust-network",
+        action="store_true",
+        help="bind wider with no tokens, because the only route here is a private network",
     )
 
     q = sub.add_parser(
@@ -608,7 +618,13 @@ def _serve(args: argparse.Namespace) -> int:
     url = os.environ.get(DB_URL_ENV)
     if not url:
         raise SystemExit(f"set {DB_URL_ENV}")
-    return serve(url, host=args.host, port=args.port, allow_sqlite=args.allow_sqlite)
+    return serve(
+        url,
+        host=args.host,
+        port=args.port,
+        allow_sqlite=args.allow_sqlite,
+        trust_network=args.trust_network,
+    )
 
 
 def _sample(args: argparse.Namespace) -> int:

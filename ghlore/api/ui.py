@@ -160,7 +160,7 @@ _PAGE = """
     <button class="primary">search</button>
     <button type="button" id="toggle-raw">view as the model sees it</button>
   </form>
-  <div class="note">
+  <div class="note" id="token-field">
     <label>token
       <input id="token" size="24" placeholder="bearer token, if required"></label>
   </div>
@@ -178,11 +178,13 @@ _PAGE = """
          claims.</p>
       <div class="samples" id="samples"></div>
 
+      <div id="token-guide">
       <h3>Tokens</h3>
       <p>Every endpoint that returns content is scoped to a bearer token, so a daemon
          with tokens configured will refuse both the search and the health strip until
          you paste one. A token is one entry of <code>GHLORE_API_TOKENS</code> — the
          part before the first <code>:</code>. It is remembered in this browser only.</p>
+      </div>
 
       <h3>The CLI</h3>
       <p>The base install is a read-only HTTP client — no database driver, no parser —
@@ -195,10 +197,9 @@ ghlore search "why is this cast here" --kind rationale --file src/transformers/m
 ghlore inflight 48630 --repo huggingface/transformers
 ghlore thread 47720 --focus "cropping" --repo huggingface/transformers
 ghlore status</pre>
-      <p><code>--repo</code> is required on a bare number whenever your token can see more
-         than one repository — a number alone would be ambiguous, and guessing would
-         silently answer about the wrong project. The error lists the repositories the
-         token can see.</p>
+      <p><code>--repo</code> is required on a bare number whenever more than one
+         repository is in scope — a number alone would be ambiguous, and guessing would
+         silently answer about the wrong project. The error lists what to choose from.</p>
       <p><code>--compact</code> trims snippets for a tight context budget. A client may
          ask for less; never for more.</p>
 
@@ -242,6 +243,12 @@ const $ = (s) => document.querySelector(s);
 // `/?q=...`. The page still renders, the access log still says 200, and nothing
 // searches. Shipped that way on 2026-09-09 and found by a person opening the page,
 // which is exactly what section 8 says the UI is for.
+// Whether this daemon wants a token, answered by the daemon rather than guessed from a
+// 401. `page()` rewrites the literal below. When it is false the token field, the token
+// section of the guide and the `GHLORE_TOKEN` line of the setup snippet are all removed:
+// telling somebody to paste a credential that is not read is worse than saying nothing,
+// and it is the kind of instruction people follow anyway and then debug.
+const AUTH_REQUIRED = /*AUTH*/true;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const split = (s) => String(s || "").split(",").map((x) => x.trim()).filter(Boolean);
@@ -375,9 +382,15 @@ $("#samples").addEventListener("click", (event) => {
 });
 
 // The setup lines name *this* daemon, so they can be pasted without editing.
+if (!AUTH_REQUIRED) {
+  for (const id of ["token-field", "token-guide"]) {
+    const el = $("#" + id);
+    if (el) el.hidden = true;
+  }
+}
 $("#cli-setup").textContent =
   `pip install git+https://github.com/huggingface/ghlore\nexport GHLORE_API=${location.origin}` +
-  `\nexport GHLORE_TOKEN=<your token>   # only if this daemon requires one`;
+  (AUTH_REQUIRED ? `\nexport GHLORE_TOKEN=<your token>   # only if this daemon requires one` : ``);
 $("#agent-snippet").textContent =
   `## Project history\n\n` +
   `This project's issue and PR history is indexed and searchable with \`ghlore\`.\n\n` +
@@ -529,5 +542,12 @@ health();
 """
 
 
-def page() -> str:
-    return _PAGE.strip()
+def page(*, auth_required: bool = True) -> str:
+    """The page, told whether this daemon wants a token.
+
+    Defaults to ``True`` so a caller that forgets to ask renders the page that *mentions*
+    a credential rather than the one that hides it -- the harmless direction of a wrong
+    guess.
+    """
+    out = _PAGE if auth_required else _PAGE.replace("/*AUTH*/true", "/*AUTH*/false")
+    return out.strip()

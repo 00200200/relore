@@ -390,16 +390,20 @@ def test_the_page_is_self_contained(client: TestClient) -> None:
     assert "/api/v1/search" in body
 
 
-def test_the_pages_javascript_parses(tmp_path) -> None:
+@pytest.mark.parametrize("auth_required", [True, False])
+def test_the_pages_javascript_parses_either_way(tmp_path, auth_required: bool) -> None:
     """A syntax error in the page is a silently dead instrument: the HTML still returns
     200, the health strip stays on its placeholder, and nothing in the Python suite
-    notices. Skipped by name where node is absent rather than passing quietly."""
+    notices. Skipped by name where node is absent rather than passing quietly.
+
+    Both renderings, because `page()` rewrites a literal *inside* the script, and a
+    substitution that produced invalid JavaScript would leave exactly that dead page."""
     node = shutil.which("node")
     if not node:
         pytest.skip("no node on PATH to syntax-check the page")
 
-    blocks = re.findall(r"<script>(.*?)</script>", ui.page(), re.S)
-    assert len(blocks) == 1, "one inline script; no build step and no second implementation"
+    blocks = re.findall(r"<script>(.*?)</script>", ui.page(auth_required=auth_required), re.S)
+    assert len(blocks) == 1
     script = tmp_path / "ui.js"
     script.write_text(blocks[0])
 
@@ -408,6 +412,33 @@ def test_the_pages_javascript_parses(tmp_path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_an_open_daemon_does_not_ask_for_a_credential_it_will_not_read(engine: Engine) -> None:
+    """Telling somebody to paste a token that is nothing is worse than saying nothing: it
+    is an instruction people follow and then debug. The daemon answers the question rather
+    than the page guessing from a 401."""
+    open_client = TestClient(build_app(engine, auth=Authenticator(tokens=())))
+
+    body = open_client.get("/").text
+
+    assert "/*AUTH*/false" in body
+    # The affordances are still in the document and hidden by the script, which is what
+    # keeps one page and one implementation (section 8).
+    assert 'id="token-field"' in body
+
+
+def test_a_daemon_with_tokens_still_explains_them(engine: Engine) -> None:
+    """The default fixture app has no tokens, so this one is built with one: the page has
+    to follow the daemon it is served by, and the test suite's default daemon is open."""
+    auth = Authenticator(tokens=(Token("t", "secret", repos=None),))
+    guarded = TestClient(build_app(engine, auth=auth))
+    guarded.headers["authorization"] = "Bearer secret"
+
+    body = guarded.get("/").text
+
+    assert "/*AUTH*/true" in body
+    assert "GHLORE_API_TOKENS" in body
 
 
 # -- labelling -------------------------------------------------------------
@@ -505,6 +536,37 @@ def test_serve_refuses_a_public_bind_with_no_tokens(monkeypatch, tmp_path) -> No
 
     with pytest.raises(SystemExit, match="no tokens configured"):
         serve(f"sqlite:///{tmp_path / 'x.db'}", host="0.0.0.0", port=0, allow_sqlite=True)
+
+
+def test_serve_binds_wide_without_tokens_only_when_told_the_network_is_the_perimeter(
+    monkeypatch, tmp_path
+) -> None:
+    """`--trust-network` answers the rule rather than removing it.
+
+    The flag exists so the default stays fail-closed: a deployment that *loses* its token
+    configuration must refuse to come up rather than come up open. Asserted by the pair —
+    the same call refused above, permitted here, and nothing else changed.
+
+    It gets as far as binding, so the port is 0 and uvicorn is stubbed out; what is under
+    test is the guard, not the server.
+    """
+    monkeypatch.delenv("GHLORE_API_TOKENS", raising=False)
+    monkeypatch.delenv("GHLORE_API_TOKENS_FILE", raising=False)
+    ran: dict[str, object] = {}
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: ran.update(kw))
+
+    code = serve(
+        f"sqlite:///{tmp_path / 'x.db'}",
+        host="0.0.0.0",
+        port=0,
+        allow_sqlite=True,
+        trust_network=True,
+    )
+
+    assert code == 0
+    assert ran["host"] == "0.0.0.0"
 
 
 def test_every_page_helper_is_declared_before_it_is_used() -> None:

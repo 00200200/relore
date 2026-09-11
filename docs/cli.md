@@ -140,12 +140,14 @@ starts after it.
 ghlore thread 48630 --full            # the whole opening post, reproduction included
 ```
 
-**`--repo` is required on a bare number when your token can see more than one
-repository.** The deployed daemon's tokens see two, so `ghlore thread 47720` there answers
-`400: pass repo=: this token can see ['huggingface/serge', 'huggingface/transformers']`.
-That is deliberate — a number alone is ambiguous and guessing would silently answer about
-the wrong project — and the message lists what to choose from. `search` needs no `--repo`
-because it spans the token's whole scope by design.
+**`--repo` is required on a bare number when more than one repository is in scope.** The
+deployment indexes two, so `ghlore thread 47720` there answers
+`400: pass repo=: more than one repository is in scope ['huggingface/serge',
+'huggingface/transformers']`. That is deliberate — a number alone is ambiguous and guessing
+would silently answer about the wrong project — and the message lists what to choose from.
+It has nothing to do with authentication: an open daemon resolves the anonymous caller to
+every indexed repository, so the same rule applies. `search` needs no `--repo` because it
+spans the whole scope by design.
 
 ## "Is somebody already fixing this?"
 

@@ -78,7 +78,7 @@ spec:
         - name: serve
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: [{{ include "ghlore.verbosity" . }}"serve", "--host", "0.0.0.0", "--port", "8080"]
+          args: [{{ include "ghlore.verbosity" . }}"serve", "--host", "0.0.0.0", "--port", "8080"{{ if .Values.api.trustNetwork }}, "--trust-network"{{ end }}]
           ports:
             - name: http
               containerPort: 8080
@@ -101,16 +101,27 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: GHLORE_DATABASE_URL
               value: {{ include "ghlore.databaseUrl" . | quote }}
+            {{- if .Values.api.trustNetwork }}
+            # Emptied *after* `envFrom`, so a token left behind in the secret store
+            # cannot quietly re-enable authentication on a deployment whose perimeter is
+            # the network. The absence is then a property of this release, not of what
+            # somebody remembered to delete in Infisical.
+            - name: GHLORE_API_TOKENS
+              value: ""
+            {{- end }}
           {{- if .Values.labels.enabled }}
           volumeMounts:
             - name: labels
               mountPath: {{ dir .Values.labels.path }}
           {{- end }}
-          # `/metrics`, not `/api/v1/status`. Status requires a bearer token (section
-          # 7 scopes every endpoint that returns content), so a probe against it gets
-          # 401, readiness never passes and liveness restarts a perfectly healthy
-          # process. `/metrics` is unauthenticated on purpose -- it carries counts,
-          # never content -- which makes it the one endpoint a kubelet can ask.
+          # `/metrics`, not `/api/v1/status`. Status requires a bearer token whenever
+          # tokens are configured (section 7 scopes every endpoint that returns
+          # content), so a probe against it gets 401, readiness never passes and
+          # liveness restarts a perfectly healthy process. That it happens to answer
+          # under `api.trustNetwork` is not a reason to probe it: the probe must not
+          # change meaning with the auth mode. `/metrics` is unauthenticated on purpose
+          # -- it carries counts, never content -- which makes it the one endpoint a
+          # kubelet can ask either way.
           readinessProbe:
             httpGet:
               path: /metrics
