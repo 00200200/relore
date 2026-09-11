@@ -93,6 +93,9 @@ interface. Setup is in [`docs/operations.md`](docs/operations.md).
 
 ## Docs
 
+- [`docs/how-search-works.md`](docs/how-search-works.md) — what kind of index this is
+  (lexical and ranked, no embeddings), what goes into it, and what it is better and
+  worse at than `grep` and than a semantic index.
 - [`docs/cli.md`](docs/cli.md) — worked query examples against a real index, and the four
   ways a healthy index returns nothing.
 - [`docs/why-not-github-search.md`](docs/why-not-github-search.md) — the comparison, and

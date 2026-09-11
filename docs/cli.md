@@ -49,7 +49,8 @@ biggest cause of a disappointing result:
 | `crash when the optional mask is missing` | **0** |
 
 Two or three distinctive terms, not a sentence — that table is what one AND-ed sentence
-costs you.
+costs you. The AND is not a setting: this is a lexical index, and
+[`how-search-works.md`](how-search-works.md) is why.
 
 **A pasted traceback is the exception, and it used to be the worst case.** §6's query
 expansion now fans one call out into capped error, test-id, symbol, file and free-text

@@ -66,4 +66,5 @@ rather than returning an empty list.
 ## Vector search
 
 Deliberately **not** in v1: the column and extension are provisioned, nothing writes them,
-and turning them on is gated on a measured benchmark.
+and turning them on is gated on a measured benchmark. What is used instead — and what it
+does not cover — is in [`how-search-works.md`](how-search-works.md).

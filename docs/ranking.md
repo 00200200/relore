@@ -5,7 +5,9 @@
 chosen by hand is one nobody can argue with later. Every hit carries its score broken down
 by term, so the term that is wrong is visible in the web UI.
 
-Lexical and structural: exact evidence outranks topical similarity.
+Lexical and structural: exact evidence outranks topical similarity. What that means for the kind of
+question you can ask — and the two tools it is not — is in
+[`how-search-works.md`](how-search-works.md).
 
 ```text
 score = w1*error overlap + w2*test-id + w3*symbol + w4*file + w5*full-text rank
