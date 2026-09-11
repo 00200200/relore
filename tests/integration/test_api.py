@@ -513,6 +513,17 @@ def test_the_probe_and_the_page_are_outside_the_rule(engine: Engine) -> None:
     assert bare.get("/").status_code == 200
 
 
+def test_the_answer_is_above_the_guide_on_the_page(client: TestClient) -> None:
+    """ "Try one" runs the query from inside a long `<details>`, so with the results
+    rendered below it the visitor's page did not visibly change: the search ran, the hits
+    were in the DOM, and everything on screen was still instructions. A result nobody can
+    see is the same failure as no result."""
+    body = client.get("/").text
+
+    assert body.index('id="hits"') < body.index('class="guide"')
+    assert body.index('id="message"') < body.index('class="guide"')
+
+
 def test_the_page_declares_the_version_that_served_it(client: TestClient) -> None:
     """The page is a client of the same API, so it passes its own handshake -- and a page
     a browser kept across a deploy fails it, which is the point."""

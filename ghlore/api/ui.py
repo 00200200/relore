@@ -169,6 +169,15 @@ _PAGE = """
       <input id="token" size="24" placeholder="bearer token, if required"></label>
   </div>
 
+  <!-- The answer sits directly under the form, ABOVE the guide. It used to be below
+       it, and the guide is long enough that clicking "try one" scrolled the results
+       off the bottom of the page: the search ran, the hits rendered, and the visitor
+       saw an unchanged page of instructions. A result the caller cannot see is the
+       same failure as no result. -->
+  <div id="message" class="note"></div>
+  <pre id="raw" hidden></pre>
+  <div id="hits"></div>
+
   <!-- Everything below is for a first-time visitor. The tool assumed you already
        knew what to type, which is a poor first impression for something whose whole
        argument is that the knowledge exists but nobody can reach it. -->
@@ -228,10 +237,6 @@ ghlore status</pre>
          deployment that commissioned them.</p>
     </div>
   </details>
-
-  <div id="message" class="note"></div>
-  <pre id="raw" hidden></pre>
-  <div id="hits"></div>
 
   <!-- The index-health strip lives at the bottom, not under the title. It answers
        "is the index current?", which is a question you ask *about* a result set --
