@@ -31,6 +31,10 @@ lands in a JSONL file that is never indexed -- see :mod:`ghlore.api.server`.
 
 from __future__ import annotations
 
+import json
+
+from ghlore import __version__
+
 _PAGE = """
 <!doctype html>
 <meta charset="utf-8">
@@ -190,7 +194,11 @@ _PAGE = """
       <p>The base install is a read-only HTTP client — no database driver, no parser —
          so it is safe to drop into a constrained agent sandbox. It installs from
          <code>main</code>, not from PyPI: there is no release yet, so
-         <code>pip install ghlore</code> would fetch whatever else owns that name.</p>
+         <code>pip install ghlore</code> would fetch whatever else owns that name.
+         The client and the daemon must be the <em>same version</em> — this one refuses a
+         request from any other, rather than answering it with a contract the caller does
+         not have. If yours is refused, upgrade it; if it says the daemon is behind, this
+         deployment is the thing to redeploy.</p>
       <pre id="cli-setup">pip install git+https://github.com/huggingface/ghlore</pre>
       <pre>ghlore search "AttributeError: 'NoneType' object has no attribute 'shape'" --kind failure
 ghlore search "why is this cast here" --kind rationale --file src/transformers/masking_utils.py
@@ -283,8 +291,13 @@ token.addEventListener("keydown", (event) => {
 // A 401 is not an error to display, it is a question to ask. Everything else is
 // shown as whatever the server said, because those are real failures worth reading.
 const AUTH_HINT = "this index requires a token — paste one below";
+// A 426 here can only be a page the browser kept from a previous version of the daemon:
+// the page and the daemon that served it always agree. Saying "reload" is the whole fix,
+// and the daemon's own sentence (which talks about `pip install`) is not.
+const STALE_PAGE = "this page was served by an older ghlore — reload it (⌘/Ctrl-Shift-R)";
 function readable(status, body) {
   if (status === 401 || status === 403) return AUTH_HINT;
+  if (status === 426) return STALE_PAGE;
   try {
     const parsed = typeof body === "string" ? JSON.parse(body) : body;
     return String(parsed.detail || parsed.message || body);
@@ -295,8 +308,13 @@ function wantToken(yes) {
   $("#token").classList.toggle("wanted", yes);
 }
 
+// The page is a client of the same API as `ghlore`, so it declares its version like one.
+// `page()` rewrites the literal to the daemon's own version, which means the two agree by
+// construction -- until a browser reuses a page from before a deploy, which is exactly
+// the case the handshake should catch rather than answer with a stale renderer.
+const CLIENT_VERSION = "/*VERSION*/0.0.0";
 const headers = () => {
-  const h = {"content-type": "application/json"};
+  const h = {"content-type": "application/json", "x-ghlore-client": CLIENT_VERSION};
   if (token.value.trim()) h["authorization"] = "Bearer " + token.value.trim();
   return h;
 };
@@ -389,7 +407,8 @@ if (!AUTH_REQUIRED) {
   }
 }
 $("#cli-setup").textContent =
-  `pip install git+https://github.com/huggingface/ghlore\nexport GHLORE_API=${location.origin}` +
+  `pip install git+https://github.com/huggingface/ghlore   # must be ${CLIENT_VERSION}` +
+  `\nexport GHLORE_API=${location.origin}` +
   (AUTH_REQUIRED ? `\nexport GHLORE_TOKEN=<your token>   # only if this daemon requires one` : ``);
 $("#agent-snippet").textContent =
   `## Project history\n\n` +
@@ -543,11 +562,16 @@ health();
 
 
 def page(*, auth_required: bool = True) -> str:
-    """The page, told whether this daemon wants a token.
+    """The page, told whether this daemon wants a token, and stamped with its version.
 
-    Defaults to ``True`` so a caller that forgets to ask renders the page that *mentions*
-    a credential rather than the one that hides it -- the harmless direction of a wrong
-    guess.
+    ``auth_required`` defaults to ``True`` so a caller that forgets to ask renders the page
+    that *mentions* a credential rather than the one that hides it -- the harmless
+    direction of a wrong guess.
+
+    The version stamp has no such default to get wrong: the page is served by the daemon
+    whose version it declares, so it passes the handshake (:mod:`ghlore.wire`) by
+    construction, and a page that fails it is a page the browser cached across a deploy.
     """
     out = _PAGE if auth_required else _PAGE.replace("/*AUTH*/true", "/*AUTH*/false")
+    out = out.replace('"/*VERSION*/0.0.0"', json.dumps(__version__))
     return out.strip()

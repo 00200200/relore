@@ -4,8 +4,9 @@ Two verb families, deliberately in one binary:
 
 * **history verbs** (``search``, ``thread``, ``inflight``, ``precedent``, ``why``,
   ``status``) talk to a
-  ``ghlored`` over HTTP. They need ``GHLORE_API`` and, if that daemon requires one, a
-  token in ``GHLORE_TOKEN``.
+  ``ghlored`` over HTTP. They need ``GHLORE_API``, a daemon of **this same version**
+  (:mod:`ghlore.wire` -- the two ship together and refuse to talk across a difference)
+  and, if that daemon requires one, a token in ``GHLORE_TOKEN``.
 * **code verbs** (``map``, ``defs``, ``refs``) run locally against the working tree and
   never touch the network, a database, or a token.
 
@@ -32,6 +33,7 @@ from typing import Any
 from ghlore import __version__
 from ghlore.code.api import MissingParser
 from ghlore.render import render_inflight, render_search, render_status, render_thread
+from ghlore.wire import CLIENT_HEADER, SERVER_HEADER, UPGRADE_REQUIRED, explain
 
 API_ENV = "GHLORE_API"
 TOKEN_ENVS = ("GHLORE_TOKEN", "GHLORE_API_TOKEN")
@@ -415,14 +417,14 @@ def _call(
 ) -> dict[str, Any]:
     """One request, with the failure modes told apart.
 
-    A 404 or an empty index is data; a refused connection, a 401 and a 429 are not, and
-    each gets its own sentence. Blurring them is how an agent decides the project has no
-    history when the daemon is simply down.
+    A 404 or an empty index is data; a refused connection, a 401, a 426 and a 429 are not,
+    and each gets its own sentence. Blurring them is how an agent decides the project has
+    no history when the daemon is simply down.
     """
     import httpx
 
     base = args.api or os.environ.get(API_ENV) or DEFAULT_API
-    headers = {"accept": "application/json"}
+    headers = {"accept": "application/json", CLIENT_HEADER: __version__}
     # The *name* too, not just the value: a 401 has to say which variable was rejected,
     # and there are two it could have come from.
     sent_from = next((e for e in TOKEN_ENVS if os.environ.get(e)), None)
@@ -449,6 +451,26 @@ def _call(
             f"{API_ENV} at your own `ghlored serve`, or port-forward the deployment: "
             f"`kubectl -n ghlore port-forward deploy/ghlore 8080:8080`."
         ) from None
+
+    if response.status_code == UPGRADE_REQUIRED:
+        # The daemon caught the version difference. It composed the sentence, because it
+        # knows both numbers -- print that rather than a second opinion.
+        raise SystemExit(f"ghlore: {_detail(response)}")
+
+    # The other direction: a daemon older than the handshake enforces nothing, so the
+    # client is the only end that can catch "the deployment is behind". Checked before
+    # the 401 and the 429 so a version problem is never reported as a credential problem,
+    # which is the same ordering the daemon's own gate uses.
+    served_by = response.headers.get(SERVER_HEADER)
+    if served_by is None:
+        raise SystemExit(
+            f"ghlore: {base} answered without a {SERVER_HEADER} header, so it is not a "
+            f"ghlore daemon of this generation — it predates the version handshake, or "
+            f"something else is answering on that address. This client is {__version__}."
+        )
+    mismatch = explain(__version__, served_by)
+    if mismatch is not None:
+        raise SystemExit(f"ghlore: {mismatch}")
 
     if response.status_code == 401:
         # Two failures, not one. Telling an operator who has already exported a token to

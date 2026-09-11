@@ -282,6 +282,32 @@ one, because every line of every quoted field is prefixed on the way out — so 
 line is always ours. A new field carrying somebody else's words must be quoted when it is
 rendered; the scrub covers it either way, the attribution does not.
 
+## One version, both ends
+
+`ghlore/__init__.py`'s `__version__` is the **compatibility contract**, not a label, and it
+is the only place the version is written — `pyproject.toml` reads it from there.
+
+The client and the daemon refuse to talk across a difference: every `/api/v1` request
+declares `x-ghlore-client`, a daemon that reads anything else answers **426**, and every
+response carries `x-ghlore-version` so the client catches a daemon too old to enforce it.
+The reason is the failure this project is worst at noticing — an old client gets an answer
+whose every known field is right and whose new ones are simply absent: well-formed,
+plausible, silently incomplete (§13.3). `ghlore/wire.py`, and it is stdlib-only because
+invariant 1 puts it in the client's import graph.
+
+Two rules follow, and forgetting either is felt by somebody else:
+
+1. **Bump it in the same commit as any change a client can see** — a wire payload, a
+   renderer, a CLI flag. The minor is the completed milestone; the patch is releases
+   within it.
+2. **The bump and the deploy are one operation.** A bump on `main` that is not shipped
+   breaks every client installed after the merge; they are told the deployment is behind,
+   which is true and is nobody's intent.
+
+→ `tests/unit/test_wire.py`, `tests/integration/test_api.py` ("the version handshake"),
+`tests/integration/test_cli_client.py`. A test client that talks to `/api/v1` sends the
+header, because every real client does.
+
 ## Commands
 
 ```bash

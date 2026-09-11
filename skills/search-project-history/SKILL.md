@@ -105,6 +105,15 @@ Empty is exit 0 and is usually not a fault. In order of likelihood:
 A daemon that is down reports differently from an empty index. If you are unsure which you
 are looking at, run `ghlore status`.
 
+## If it says your client is out of date
+
+`ghlore` and the daemon it talks to must be the same version, so a mismatch is refused
+rather than answered — an old client would otherwise get a complete-looking reply missing
+whatever it does not know to ask for, and nothing downstream could tell. Reinstall the
+client (`pip install --upgrade 'ghlore @ git+https://github.com/huggingface/ghlore'`) and
+retry. If the message says the *daemon* is behind, your client is fine and the deployment
+is stale: say so to whoever owns it rather than working around it.
+
 ## What you cannot do
 
 There is no write verb, and there will not be one — an agent's conclusion must never become

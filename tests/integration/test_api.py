@@ -17,14 +17,22 @@ from fake_github import FakeGitHub
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
+from ghlore import __version__
 from ghlore.api import ui
 from ghlore.api.server import build_app, serve
 from ghlore.api.tokens import LABEL_SCOPE, Authenticator, Token
 from ghlore.ingest.index_thread import index_thread
 from ghlore.search.queries import MAX_HITS, MAX_SNIPPET_CHARS
 from ghlore.security.untrusted import BEGIN, END, NOTICE
+from ghlore.wire import CLIENT_HEADER, SERVER_HEADER, UPGRADE_REQUIRED
 
 REPO = "owner/name"
+
+
+def _serving(app) -> TestClient:
+    """Every request declares its client version, because every real client does
+    (:mod:`ghlore.wire`). The handshake tests below override the header themselves."""
+    return TestClient(app, headers={CLIENT_HEADER: __version__})
 
 
 @pytest.fixture
@@ -40,7 +48,7 @@ def _index(engine: Engine, fake: FakeGitHub, *numbers: int) -> None:
 
 @pytest.fixture
 def client(engine: Engine) -> TestClient:
-    return TestClient(build_app(engine))
+    return _serving(build_app(engine))
 
 
 def _search(client: TestClient, **body) -> dict:
@@ -127,7 +135,7 @@ def test_a_token_sees_only_its_own_repositories(engine: Engine, fake) -> None:
     fake.add_pr(1, body="scoped wording")
     _index(engine, fake, 1)
     auth = Authenticator(tokens=(Token("t", "secret", repos=("someone/else",)),))
-    client = TestClient(build_app(engine, auth=auth))
+    client = _serving(build_app(engine, auth=auth))
     client.headers["authorization"] = "Bearer secret"
 
     payload = _search(client, query="scoped")
@@ -142,7 +150,7 @@ def test_a_wildcard_token_is_resolved_to_concrete_names(engine: Engine, fake) ->
     fake.add_pr(1, body="scoped wording")
     _index(engine, fake, 1)
     auth = Authenticator(tokens=(Token("t", "secret", repos=None),))
-    client = TestClient(build_app(engine, auth=auth))
+    client = _serving(build_app(engine, auth=auth))
     client.headers["authorization"] = "Bearer secret"
 
     assert _search(client, query="scoped")["query"]["repos"] == [REPO]
@@ -164,7 +172,7 @@ def _two_repos(engine: Engine) -> None:
 
 def _scoped(engine: Engine, *repos: str) -> TestClient:
     auth = Authenticator(tokens=(Token("t", "secret", repos=repos or None),))
-    client = TestClient(build_app(engine, auth=auth))
+    client = _serving(build_app(engine, auth=auth))
     client.headers["authorization"] = "Bearer secret"
     return client
 
@@ -232,7 +240,7 @@ def test_an_unindexed_name_in_the_filter_is_simply_absent(engine: Engine) -> Non
 
 def test_a_missing_token_is_401_when_tokens_are_configured(engine: Engine) -> None:
     auth = Authenticator(tokens=(Token("t", "secret", repos=None),))
-    client = TestClient(build_app(engine, auth=auth))
+    client = _serving(build_app(engine, auth=auth))
 
     assert client.post("/api/v1/search", json={"query": "x"}).status_code == 401
 
@@ -240,7 +248,7 @@ def test_a_missing_token_is_401_when_tokens_are_configured(engine: Engine) -> No
 def test_a_rate_limit_says_which_one_was_hit(engine: Engine) -> None:
     """ "Slow down" and "come back tomorrow" call for different behaviour (section 7)."""
     auth = Authenticator(tokens=(Token("t", "secret", repos=None),), per_minute=1, per_day=99)
-    client = TestClient(build_app(engine, auth=auth))
+    client = _serving(build_app(engine, auth=auth))
     client.headers["authorization"] = "Bearer secret"
 
     assert client.get("/api/v1/status").status_code == 200
@@ -273,7 +281,7 @@ def test_a_thread_number_outside_the_scope_is_404_not_403(engine: Engine, fake) 
     fake.add_pr(1)
     _index(engine, fake, 1)
     auth = Authenticator(tokens=(Token("t", "secret", repos=("a/b", "c/d")),))
-    client = TestClient(build_app(engine, auth=auth))
+    client = _serving(build_app(engine, auth=auth))
     client.headers["authorization"] = "Bearer secret"
 
     assert client.get(f"/api/v1/thread/1?repo={REPO}").status_code == 404
@@ -281,7 +289,7 @@ def test_a_thread_number_outside_the_scope_is_404_not_403(engine: Engine, fake) 
 
 def test_a_bare_number_is_refused_when_the_scope_is_ambiguous(engine: Engine) -> None:
     auth = Authenticator(tokens=(Token("t", "secret", repos=("a/b", "c/d")),))
-    client = TestClient(build_app(engine, auth=auth))
+    client = _serving(build_app(engine, auth=auth))
     client.headers["authorization"] = "Bearer secret"
 
     response = client.get("/api/v1/thread/1")
@@ -315,7 +323,7 @@ def test_inflight_outside_the_scope_is_404_not_403(engine: Engine, fake) -> None
     fake.add_pr(1, body="Fixes #2")
     _index(engine, fake, 1)
     auth = Authenticator(tokens=(Token("t", "secret", repos=("a/b", "c/d")),))
-    client = TestClient(build_app(engine, auth=auth))
+    client = _serving(build_app(engine, auth=auth))
     client.headers["authorization"] = "Bearer secret"
 
     assert client.get(f"/api/v1/inflight/2?repo={REPO}").status_code == 404
@@ -367,7 +375,7 @@ def test_metrics_needs_no_token_and_carries_no_content(engine: Engine, fake) -> 
     fake.add_pr(1, body="a secret-looking body")
     _index(engine, fake, 1)
     auth = Authenticator(tokens=(Token("t", "secret", repos=None),))
-    client = TestClient(build_app(engine, auth=auth))
+    client = _serving(build_app(engine, auth=auth))
 
     body = client.get("/metrics").text
 
@@ -418,7 +426,7 @@ def test_an_open_daemon_does_not_ask_for_a_credential_it_will_not_read(engine: E
     """Telling somebody to paste a token that is nothing is worse than saying nothing: it
     is an instruction people follow and then debug. The daemon answers the question rather
     than the page guessing from a 401."""
-    open_client = TestClient(build_app(engine, auth=Authenticator(tokens=())))
+    open_client = _serving(build_app(engine, auth=Authenticator(tokens=())))
 
     body = open_client.get("/").text
 
@@ -432,13 +440,87 @@ def test_a_daemon_with_tokens_still_explains_them(engine: Engine) -> None:
     """The default fixture app has no tokens, so this one is built with one: the page has
     to follow the daemon it is served by, and the test suite's default daemon is open."""
     auth = Authenticator(tokens=(Token("t", "secret", repos=None),))
-    guarded = TestClient(build_app(engine, auth=auth))
+    guarded = _serving(build_app(engine, auth=auth))
     guarded.headers["authorization"] = "Bearer secret"
 
     body = guarded.get("/").text
 
     assert "/*AUTH*/true" in body
     assert "GHLORE_API_TOKENS" in body
+
+
+# -- the version handshake --------------------------------------------------
+
+
+def test_an_older_client_is_refused_rather_than_answered(client: TestClient) -> None:
+    """The failure this exists for: the old client knows every field in the answer, so a
+    reply would look complete and be missing whatever it does not know to ask for."""
+    response = client.post("/api/v1/search", json={}, headers={CLIENT_HEADER: "0.0.1"})
+
+    assert response.status_code == UPGRADE_REQUIRED
+    detail = response.json()["detail"]
+    assert "0.0.1" in detail and __version__ in detail
+    assert "older" in detail and "pip install" in detail
+
+
+def test_a_newer_client_is_told_the_deployment_is_behind(client: TestClient) -> None:
+    """The same refusal, and the opposite instruction: upgrading the client here would be
+    a downgrade, and the operator has to know which end to move."""
+    response = client.post("/api/v1/search", json={}, headers={CLIENT_HEADER: "99.0.0"})
+
+    assert response.status_code == UPGRADE_REQUIRED
+    assert "behind" in response.json()["detail"]
+
+
+def test_a_client_that_declares_nothing_is_refused_too(engine: Engine) -> None:
+    """A request with no version is a client from before the handshake, which is exactly
+    the client this keeps out -- so the absent header cannot be the permissive case."""
+    bare = TestClient(build_app(engine))
+
+    response = bare.post("/api/v1/search", json={})
+
+    assert response.status_code == UPGRADE_REQUIRED
+    assert CLIENT_HEADER in response.json()["detail"]
+
+
+def test_the_refusal_comes_before_authentication(engine: Engine) -> None:
+    """A stale client with no token has two problems and one of them is the cause. 401
+    would send the reader after a credential that was never the issue."""
+    auth = Authenticator(tokens=(Token("t", "secret", repos=None),))
+    guarded = TestClient(build_app(engine, auth=auth))
+
+    response = guarded.post("/api/v1/search", json={}, headers={CLIENT_HEADER: "0.0.1"})
+
+    assert response.status_code == UPGRADE_REQUIRED
+
+
+def test_every_response_names_the_version_that_served_it(client: TestClient) -> None:
+    """Including the refusals: this header is how a client whose daemon is too old to
+    enforce the handshake catches the same mismatch from its own end."""
+    assert client.get("/api/v1/status").headers[SERVER_HEADER] == __version__
+    assert client.get("/").headers[SERVER_HEADER] == __version__
+    refused = client.get("/api/v1/status", headers={CLIENT_HEADER: "0.0.1"})
+    assert refused.headers[SERVER_HEADER] == __version__
+
+
+def test_the_probe_and_the_page_are_outside_the_rule(engine: Engine) -> None:
+    """`/metrics` is the deployment's liveness probe (section 14.2) and `/` is how a
+    browser gets the current page in the first place: failing either on a version skew
+    would break the two things that recover from one."""
+    bare = TestClient(build_app(engine))
+
+    assert bare.get("/metrics").status_code == 200
+    assert bare.get("/").status_code == 200
+
+
+def test_the_page_declares_the_version_that_served_it(client: TestClient) -> None:
+    """The page is a client of the same API, so it passes its own handshake -- and a page
+    a browser kept across a deploy fails it, which is the point."""
+    body = client.get("/").text
+
+    assert f'"{__version__}"' in body
+    assert CLIENT_HEADER in body
+    assert "/*VERSION*/" not in body
 
 
 # -- labelling -------------------------------------------------------------
@@ -465,7 +547,7 @@ def test_a_label_lands_in_jsonl_with_the_backend_that_produced_it(engine: Engine
     auth = Authenticator(
         tokens=(Token("t", "secret", repos=None, scopes=frozenset({LABEL_SCOPE})),)
     )
-    client = TestClient(build_app(engine, auth=auth, labels_path=path))
+    client = _serving(build_app(engine, auth=auth, labels_path=path))
     client.headers["authorization"] = "Bearer secret"
 
     response = client.post(
@@ -487,7 +569,7 @@ def test_a_label_lands_in_jsonl_with_the_backend_that_produced_it(engine: Engine
 
 def test_a_token_without_the_scope_may_not_label(engine: Engine, tmp_path) -> None:
     auth = Authenticator(tokens=(Token("t", "secret", repos=None),))
-    client = TestClient(build_app(engine, auth=auth, labels_path=tmp_path / "labels.jsonl"))
+    client = _serving(build_app(engine, auth=auth, labels_path=tmp_path / "labels.jsonl"))
     client.headers["authorization"] = "Bearer secret"
 
     response = client.post(
@@ -504,7 +586,7 @@ def test_a_token_without_the_scope_may_not_label(engine: Engine, tmp_path) -> No
 
 
 def test_an_unknown_verdict_is_refused(engine: Engine, tmp_path) -> None:
-    client = TestClient(build_app(engine, labels_path=tmp_path / "labels.jsonl"))
+    client = _serving(build_app(engine, labels_path=tmp_path / "labels.jsonl"))
     response = client.post(
         "/api/v1/label",
         json={

@@ -260,6 +260,7 @@ tells you which — that distinction is deliberate (§12).
 
 ```
 $ ghlore status
+version   0.3.0
 backend   postgresql / ts_rank_cd  capabilities: fulltext
 schema    applied [1, 2, 3], pending []
 index     114 threads, 415 documents, 332 raw objects
@@ -271,3 +272,21 @@ quota     1/60 per minute, 1/5000 today
 has no trigram or vector tier, so a result set from one says nothing about the other —
 which is why `ghlored serve` refuses a SQLite URL without `--allow-sqlite`, and why §10's
 benchmark refuses to mix backends.
+
+`version` is the first line because the client and the daemon must be the *same* version.
+
+## "your client is older than this ghlore daemon"
+
+Not an outage and not something to work around:
+
+```
+$ ghlore search "429"
+ghlore: client 0.2.4 is older than this ghlore daemon (0.3.0), so it would read an
+out-of-date answer as a complete one. pip install --upgrade 'ghlore @ git+…'
+```
+
+The two ship together, so every request declares its version and a daemon refuses any
+other — an old client would otherwise get a well-formed answer missing whatever it does
+not know to ask for, which is the one failure nothing downstream can detect. Do what the
+message says. If it instead says the daemon is **behind**, the client is fine and the
+*deployment* is the stale thing: redeploy it rather than downgrading.

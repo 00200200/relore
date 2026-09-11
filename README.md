@@ -13,7 +13,8 @@ queryable.
 
 ```bash
 # No PyPI release yet, so install from main -- `pip install ghlore` would fetch
-# whatever else owns that name.
+# whatever else owns that name. The client must be the same version as the daemon it
+# talks to; if it is not, the daemon refuses the request and says which end is behind.
 pip install git+https://github.com/huggingface/ghlore
 export GHLORE_API=https://your-ghlore  # a running `ghlored serve`
 export GHLORE_TOKEN=…                  # if that daemon requires one
@@ -120,6 +121,30 @@ A security boundary, not packaging taste. `ghlore` — the binary agents get —
 a database connection, because the code to do so is not in it**, asserted by a test over
 the import graph. Parsers and the server are optional extras, so the sandbox install stays
 thin.
+
+### One version, both ends
+
+They ship together and they **refuse to talk across a version difference**. Every request
+to `/api/v1` declares its client version in `x-ghlore-client`; a daemon that reads anything
+else answers `426 Upgrade Required` and one sentence saying which end is behind. Every
+response carries `x-ghlore-version`, so a client whose daemon is too old to enforce that
+catches the same mismatch from its side.
+
+The reason is the failure mode, not tidiness: an old client asking a new daemon gets an
+answer where every field it knows about is present and correct, and whatever the newer
+version would have added is simply absent. Well-formed, plausible, silently incomplete —
+the shape of every defect in §13.3. A refusal is legible; a short answer is not.
+
+The price is that `ghlore/__init__.py`'s `__version__` is a contract rather than a label:
+
+* it is the **only** place the version is written (`pyproject.toml` reads it from there);
+* **bump it in the same commit** as any change a client can see — a wire payload, a
+  renderer, a CLI flag; and
+* **bump and deploy are one operation.** A bump merged to `main` and not shipped breaks
+  every client installed after the merge, and they will be told the deployment is behind.
+
+`ghlore --version`, `ghlored --version`, `ghlore status` and the daemon's page all print
+it, so "which version is this" never needs a guess.
 
 ## Quickstart
 

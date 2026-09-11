@@ -49,6 +49,7 @@ from ghlore.store import schema as s
 from ghlore.store.dialect import is_deployment_grade
 from ghlore.store.migrations import describe
 from ghlore.store.repository import index_summary
+from ghlore.wire import CLIENT_HEADER, SERVER_HEADER, UPGRADE_REQUIRED, explain
 
 log = logging.getLogger(__name__)
 
@@ -134,6 +135,34 @@ def build_app(
     deps = Deps(engine, auth=auth, labels_path=labels_path)
     app = FastAPI(title="ghlore", version=__version__, docs_url="/api/docs")
     app.state.deps = deps
+
+    @app.middleware("http")
+    async def version_gate(request: Request, call_next: Callable) -> Response:
+        """No ``/api/v1`` request from a client of another version, ever (:mod:`ghlore.wire`).
+
+        Middleware and not a dependency, for two reasons. It has to stamp
+        :data:`~ghlore.wire.SERVER_HEADER` on *every* response including the refusals --
+        that header is how a client whose daemon is too old to enforce this catches the
+        same mismatch from its end. And it has to run before authentication, so a caller
+        holding a stale client and a stale token is told the actionable thing rather than
+        the first thing.
+
+        ``/`` and ``/metrics`` are outside the rule on purpose: the page is how a browser
+        *gets* the current client, and ``/metrics`` is the deployment's probe (section
+        14.2), which must not fail on a version skew it cannot fix.
+        """
+        if request.url.path.startswith("/api/v1/"):
+            mismatch = explain(request.headers.get(CLIENT_HEADER))
+            if mismatch is not None:
+                deps.counters["version_refused"] += 1
+                return JSONResponse(
+                    {"detail": mismatch, "version": __version__},
+                    status_code=UPGRADE_REQUIRED,
+                    headers={SERVER_HEADER: __version__},
+                )
+        response = await call_next(request)
+        response.headers[SERVER_HEADER] = __version__
+        return response
 
     @app.post("/api/v1/search")
     def search(body: SearchRequest, token: Caller) -> Response:

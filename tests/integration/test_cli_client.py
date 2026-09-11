@@ -20,11 +20,12 @@ from fake_github import FakeGitHub
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
-from ghlore import cli
+from ghlore import __version__, cli
 from ghlore.api.server import build_app
 from ghlore.api.tokens import Authenticator, Token
 from ghlore.ingest.index_thread import index_thread
 from ghlore.security.untrusted import BEGIN, END
+from ghlore.wire import CLIENT_HEADER, SERVER_HEADER
 
 REPO = "owner/name"
 
@@ -277,3 +278,76 @@ def test_repeatable_filters_reach_the_api_as_lists(wired, engine, fake, capsys) 
 def test_an_unimplemented_verb_names_its_milestone(wired) -> None:
     with pytest.raises(SystemExit, match="milestone 4"):
         cli.main(["precedent"])
+
+
+def test_the_client_declares_its_version_on_every_request(wired, engine, capsys) -> None:
+    """Nothing to configure and no way to opt out: the handshake is only worth anything if
+    every request carries it (:mod:`ghlore.wire`)."""
+    seen = []
+    inner = httpx.request
+
+    def record(method, url, **kwargs):
+        seen.append(kwargs["headers"].get(CLIENT_HEADER))
+        return inner(method, url, **kwargs)
+
+    httpx.request = record
+    try:
+        _run(capsys, "status")
+        _run(capsys, "search", "anything")
+    finally:
+        httpx.request = inner
+
+    assert seen == [__version__, __version__]
+
+
+def test_a_client_older_than_the_daemon_refuses_to_read_the_answer(
+    wired, engine, fake, monkeypatch, capsys
+) -> None:
+    """End to end, through the real refusal: an out-of-date client must fail loudly rather
+    than print an answer shaped by a contract it does not have."""
+    fake.add_pr(1, body="findable wording")
+    _index(engine, fake, 1)
+    monkeypatch.setattr(cli, "__version__", "0.0.1")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["search", "findable"])
+
+    assert "0.0.1" in str(exc.value) and "older" in str(exc.value)
+    assert "findable" not in capsys.readouterr().out
+
+
+def test_a_daemon_too_old_to_enforce_the_handshake_is_caught_by_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other end of the same rule. A daemon from before this existed answers 200 with
+    no version header at all, and the client is then the only side that can notice."""
+
+    def ancient(method, url, **kwargs):
+        return httpx.Response(200, json={"count": 0, "hits": []})
+
+    monkeypatch.setattr(httpx, "request", ancient)
+    monkeypatch.setenv("GHLORE_API", "http://testserver")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["search", "anything"])
+
+    assert SERVER_HEADER in str(exc.value)
+    assert __version__ in str(exc.value)
+
+
+def test_a_daemon_behind_the_client_names_the_deployment_as_the_thing_to_move(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A daemon that answers 200 with an older version -- an old deployment that predates
+    the gate. Upgrading the client would be a downgrade, so the message says so."""
+
+    def older(method, url, **kwargs):
+        return httpx.Response(200, json={"count": 0}, headers={SERVER_HEADER: "0.0.1"})
+
+    monkeypatch.setattr(httpx, "request", older)
+    monkeypatch.setenv("GHLORE_API", "http://testserver")
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["search", "anything"])
+
+    assert "behind" in str(exc.value)
