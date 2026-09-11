@@ -91,3 +91,16 @@ def test_an_unimplemented_verb_says_so_in_its_help(verb: str) -> None:
 
 def test_precedent_takes_a_limit_like_every_other_listing_verb() -> None:
     assert cli.build_parser().parse_args(["precedent", "--limit", "3"]).limit == 3
+
+
+def test_the_default_api_is_the_deployment_and_is_overridable() -> None:
+    """The default moved to `ghlore.huggingface.tech` on 2026-09-11, when the name began
+    to resolve. It is pinned here because it was reverted once for a good reason — the name
+    existed and did not resolve — so a future change to it should be deliberate rather than
+    incidental. The override is the part that has to keep working: a caller with their own
+    index must never be silently pointed at production.
+    """
+    assert cli.DEFAULT_API == "https://ghlore.huggingface.tech"
+    assert cli.build_parser().parse_args(["--api", "http://127.0.0.1:9999", "status"]).api == (
+        "http://127.0.0.1:9999"
+    )

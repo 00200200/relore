@@ -316,6 +316,7 @@ ghlored sample --repo owner/name --since 2026-06-01 --kind pr --merged
 ghlored authority --repo owner/name                # else every MEMBER stays `reported`
 ghlored serve --allow-sqlite                       # refuses SQLite without the flag
 # no GHLORE_API_TOKENS set => loopback only, and it will not bind anything else
+# GHLORE_API is not optional here: the client's default is the deployment.
 GHLORE_API=http://localhost:8080 ghlore search "some error text"
 ```
 

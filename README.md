@@ -152,7 +152,8 @@ ghlored serve --port 8080 --host 0.0.0.0
 # With no tokens set, serve refuses anything but --host 127.0.0.1; with a SQLite URL it
 # refuses outright unless you pass --allow-sqlite.
 
-# client side
+# client side. `ghlore` defaults to the deployment, https://ghlore.huggingface.tech,
+# which is VPN-internal — set GHLORE_API to point it at your own daemon instead.
 export GHLORE_API=http://localhost:8080
 export GHLORE_TOKEN=tok_agent                # only if the daemon requires one
 # A query is an AND of every content term, so two or three distinctive ones beat a

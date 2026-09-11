@@ -35,15 +35,19 @@ from ghlore.render import render_inflight, render_search, render_status, render_
 
 API_ENV = "GHLORE_API"
 TOKEN_ENVS = ("GHLORE_TOKEN", "GHLORE_API_TOKEN")
-# Localhost, until the deployment has a name that resolves. `ghlore.huggingface.tech` is
-# where this is going and it was briefly the default here -- but there is no
-# `*.huggingface.tech` ACM certificate, so the ALB controller refuses to build a load
-# balancer at all (`FailedBuildModel: no certificate found for host`) and the name has no
-# DNS record. A default nobody can reach is worse than one that is merely often wrong: a
-# connection refused on localhost tells you to start a daemon, whereas a DNS failure on a
-# hostname you never typed tells you nothing you can act on. Point this at the deployment
-# when the certificate lands -- build plan section 15.4 tracks it.
-DEFAULT_API = "http://localhost:8080"
+# The deployment. This was `http://localhost:8080` for a day and the reason is worth
+# keeping, because it is the condition this default is really coupled to: the name existed
+# and did not *resolve* -- no certificate, so the ALB controller built no load balancer, so
+# no DNS record -- and a default nobody can reach is worse than one that is merely often
+# wrong. A connection refused on localhost tells you to start a daemon; a DNS failure on a
+# hostname you never typed tells you nothing you can act on.
+#
+# It resolves now (2026-09-11): the certificate landed, the controller built the load
+# balancer and auto-discovered the cert, and `external-dns` created the alias once its
+# domain filter included the name. The load balancer is **internal**, so the failure mode
+# off the VPN is a timeout against a private address rather than a DNS error -- which is
+# actionable only if the message says so, and :func:`_call` does.
+DEFAULT_API = "https://ghlore.huggingface.tech"
 
 _MILESTONE = {"precedent": 4, "why": 4, "map": 2, "defs": 2, "refs": 2}
 
@@ -435,10 +439,14 @@ def _call(
             timeout=30.0,
         )
     except httpx.HTTPError as exc:
+        # Three causes, one message, because the symptom does not distinguish them: the
+        # deployment sits behind an *internal* load balancer, so from outside the VPN this
+        # is a timeout against a private address and looks exactly like a daemon that is
+        # down.
         raise SystemExit(
             f"ghlore: cannot reach {base} ({exc.__class__.__name__}). "
-            f"Start `ghlored serve`, or set {API_ENV} — the deployed daemon has no DNS "
-            f"name yet, so reaching it means "
+            f"The deployment is VPN-internal — check the VPN first. Otherwise point "
+            f"{API_ENV} at your own `ghlored serve`, or port-forward the deployment: "
             f"`kubectl -n ghlore port-forward deploy/ghlore 8080:8080`."
         ) from None
 
