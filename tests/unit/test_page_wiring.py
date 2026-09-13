@@ -36,6 +36,38 @@ def test_the_why_examples_name_a_repository_and_a_line() -> None:
         assert "/" in repo, repo
 
 
+def test_the_page_documents_every_verb_the_cli_has() -> None:
+    """Issue #29: `--help` listed twelve subcommands and the page named four, so an agent
+    handed the URL got the toolset from two milestones ago. The list comes from the parser
+    rather than a copy of it, so a verb added later fails here until the page names it --
+    and one still marked NOT IMPLEMENTED is excluded by its own help text, so shipping it
+    is what puts it on the page's hook."""
+    import argparse
+
+    from ghlore.cli import build_parser
+
+    actions = [
+        action
+        for action in build_parser()._actions
+        if isinstance(action, argparse._SubParsersAction)
+    ]
+    verbs = {
+        name: choice.description or ""
+        for action in actions
+        for name, choice in action.choices.items()
+    }
+    helps = {
+        choice.dest: choice.help
+        for action in actions
+        for choice in action._get_subactions()  # type: ignore[attr-defined]
+    }
+    shipped = [v for v in verbs if "NOT IMPLEMENTED" not in (helps.get(v) or "")]
+
+    assert len(shipped) >= 11, f"expected the full verb list, got {sorted(shipped)}"
+    missing = [verb for verb in shipped if f"ghlore {verb}" not in HTML]
+    assert not missing, f"verbs the landing page never names in command form: {missing}"
+
+
 def test_the_page_carries_its_own_version() -> None:
     """The handshake refuses a client of another version, and the page is a client."""
     from ghlore import __version__

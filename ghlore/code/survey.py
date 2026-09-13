@@ -138,7 +138,11 @@ def symbol_body(root: str, qualname: str) -> SymbolBody | None:
     if not found:
         return None
     exact = [item for item in found if item[1].qualname == qualname]
-    path, definition, body = sorted(exact or found)[0]
+    # By an explicit key, never by the tuple: two definitions of one name in the same file
+    # tie on the path, and the fallback comparison is `Definition < Definition`, which a
+    # frozen dataclass does not implement. That was a 500 on `symbol`, and only for names
+    # duplicated *within* a file -- so it passed every test with one definition per path.
+    path, definition, body = min(exact or found, key=lambda item: (item[0], item[1].start_line))
     return SymbolBody(path=path, definition=definition, body=body, total=len(found))
 
 

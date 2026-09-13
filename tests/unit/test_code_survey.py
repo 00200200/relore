@@ -90,3 +90,28 @@ def test_symbol_returns_a_body_and_how_many_there_are(tree) -> None:
 
 def test_a_symbol_that_is_not_there_is_none_rather_than_an_error(tree) -> None:
     assert symbol_body(str(tree), "not_a_function") is None
+
+
+def test_two_definitions_of_a_name_in_one_file(tmp_path) -> None:
+    """A 500 in production: selection sorted `(path, Definition, body)` tuples, so two
+    definitions in the same file tied on the path and fell through to comparing
+    `Definition`, which a frozen dataclass does not order. Every fixture here had one
+    definition per file, which is why it passed. `transformers` does not."""
+    (tmp_path / "modeling_two.py").write_text(
+        "class A:\n"
+        "    def compute_default_rope_parameters(self, config):\n"
+        "        return 1\n"
+        "\n"
+        "\n"
+        "class B:\n"
+        "    def compute_default_rope_parameters(self, config):\n"
+        "        return 2\n"
+    )
+
+    found = symbol_body(str(tmp_path), "compute_default_rope_parameters")
+
+    assert found is not None
+    assert found.total == 2
+    # The earlier of the two, because selection has to be deterministic to be reportable.
+    assert found.definition.qualname == "A.compute_default_rope_parameters"
+    assert "return 1" in found.body

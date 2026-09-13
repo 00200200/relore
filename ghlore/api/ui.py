@@ -284,6 +284,30 @@ ghlore status</pre>
       <p><code>--compact</code> trims snippets for a tight context budget. A client may
          ask for less; never for more.</p>
 
+      <h3>The code lens</h3>
+      <p>The same questions, asked of the tree instead of the conversation. Four read this
+         daemon's working clone, checked out at <b>HEAD</b> — so they answer about the
+         project as it is, which is what a caller cannot get from the index:</p>
+      <pre>ghlore copies compute_default_rope_parameters --repo huggingface/transformers
+ghlore symbol compute_default_rope_parameters --repo huggingface/transformers
+ghlore grep 'partial_rotary_factor' --repo huggingface/transformers --path 'src/**/modeling_*.py'
+ghlore why src/transformers/masking_utils.py:1 --repo huggingface/transformers</pre>
+      <p><code>copies</code> is the one to reach for first on a repository that duplicates
+         model code on purpose: it groups every definition by whether the bodies agree, so
+         the outlier is the answer rather than something to spot in a list of 186.</p>
+      <p>Three more run against <em>your own checkout</em> and need no daemon at all —
+         they read the working tree you are editing, including the branch this index has
+         never seen:</p>
+      <pre>ghlore map                      # ranked repo map of the local checkout
+ghlore defs src/transformers/masking_utils.py
+ghlore refs compute_default_rope_parameters</pre>
+      <p><code>defs</code> and <code>refs</code> take <code>--repo</code> to ask the
+         daemon's clone instead. <code>refs</code> reports each occurrence by kind — call,
+         definition, attribute, name — because a reference index that returns only call
+         sites answers "find every affected site" with a fraction of them and no way to
+         tell. A repository with no clone answers the server-side verbs with a sentence
+         saying so; nothing else degrades.</p>
+
       <h3>Give it to Claude Code or Codex</h3>
       <p>There is no MCP server, on purpose: any agent with a shell can already call
          this. Put the two variables in the agent's environment and one paragraph in
@@ -580,6 +604,12 @@ $("#agent-snippet").textContent =
   `    ghlore inflight <issue number>\n\n` +
   `When one line is the question, ask about the line:\n\n` +
   `    ghlore why <path>:<line>            # the PR that changed it, and the review on it\n\n` +
+  `To ask about the code itself rather than the discussion:\n\n` +
+  `    ghlore grep <regex> --repo <repo>       # over the indexed checkout at HEAD\n` +
+  `    ghlore copies <symbol> --repo <repo>    # every definition, grouped by agreement\n` +
+  `    ghlore symbol <qualname> --repo <repo>  # one definition's source\n` +
+  `    ghlore map                              # your own checkout, no daemon\n` +
+  `    ghlore defs <path> | ghlore refs <symbol>\n\n` +
   `Before changing unfamiliar code, ask it why the code is the way it is:\n\n` +
   `    ghlore search "<the error, symbol, or question>" --kind failure|rationale|precedent\n` +
   `    ghlore search "<question>" --file <path>     # scope to a file\n` +
