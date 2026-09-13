@@ -1,7 +1,9 @@
 # ghlore — GitHub project memory
 
-**Index a repository's complete issue and pull-request history, and serve it back as
-searchable project memory for coding agents and humans.**
+**Search the decisions behind the code.**
+
+Index a repository's complete issue and pull-request history, and serve it back as
+searchable project memory for coding agents and humans.
 
 The knowledge that explains *why* a codebase is the way it is mostly does not live in the
 codebase. It lives in a review comment from three years ago: why a fallback cannot be
