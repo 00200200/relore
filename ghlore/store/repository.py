@@ -718,6 +718,11 @@ def index_summary(conn: Connection) -> dict[str, Any]:
             "high_water": row.high_water.isoformat() if row.high_water else None,
             "last_run_at": row.last_run_at.isoformat() if row.last_run_at else None,
             "last_ok_at": row.last_ok_at.isoformat() if row.last_ok_at else None,
+            # Where a long pass has got to, and the reason a reader can tell a pass that
+            # is *running* from one that stopped: `last_run_at` moves per committed
+            # thread, `last_ok_at` only when the pass finishes, and the cursor is cleared
+            # on completion. So run-after-ok means in flight, and a cursor says how far.
+            "cursor": row.cursor,
         }
         for row in conn.execute(select(s.sync_state).order_by(s.sync_state.c.repo))
     ]

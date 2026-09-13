@@ -389,6 +389,26 @@ def test_status_names_the_backend_and_its_ranking(client: TestClient, engine: En
     assert payload["schema"]["pending"] == []
 
 
+def test_status_says_which_passes_are_working_right_now(client: TestClient, engine: Engine) -> None:
+    """The page groups passes by repo and marks the live ones, and this is the signal it
+    reads: `last_run_at` moves per committed thread, `last_ok_at` only when a pass
+    finishes, and the cursor is cleared on completion. So run-after-ok is a pass in
+    flight -- without the cursor in the payload the page could say "indexing" and not
+    where it had got to."""
+    from ghlore.store import repository as repo_layer
+
+    with engine.begin() as conn:
+        repo_layer.touch_pass(conn, "owner/name", "threads", ok=True)
+        repo_layer.touch_pass(conn, "owner/name", "derive")  # started, not finished
+        repo_layer.set_cursor(conn, "owner/name", "derive", "4120")
+
+    passes = {p["pass"]: p for p in client.get("/api/v1/status").json()["passes"]}
+
+    assert passes["threads"]["last_run_at"] == passes["threads"]["last_ok_at"]
+    assert passes["derive"]["last_run_at"] > (passes["derive"]["last_ok_at"] or "")
+    assert passes["derive"]["cursor"] == "4120"
+
+
 def test_metrics_needs_no_token_and_carries_no_content(engine: Engine, fake) -> None:
     """Counts, never text: that is what makes it safe to leave open."""
     fake.add_pr(1, body="a secret-looking body")

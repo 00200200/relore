@@ -35,11 +35,30 @@ import json
 
 from ghlore import __version__
 
+#: The tab icon: the header mark without the waves, which are mush at 16px. A data URI
+#: rather than a route, so the page stays one self-contained response -- and assembled
+#: here rather than inline because one line of percent-encoded SVG is six times the line
+#: limit. Fixed ink: a favicon has no page to take `currentColor` from.
+_FAVICON = (
+    "data:image/svg+xml,"
+    "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-3 0 46 38'"
+    " fill='none' stroke-linecap='round'%3E"
+    "%3Cpath d='M14.7 3.3V31.4' stroke='%232f3437' stroke-width='4'/%3E"
+    "%3Cpath d='M14.7 18.5Q23.4 18.5 28.4 12.4' stroke='%232f3437' stroke-width='4'/%3E"
+    "%3Cg stroke='%232f3437' stroke-width='4' fill='%23fbfbfa'%3E"
+    "%3Ccircle cx='14.7' cy='3.3' r='3'/%3E"
+    "%3Ccircle cx='14.7' cy='18.5' r='3'/%3E"
+    "%3Ccircle cx='14.7' cy='31.4' r='3'/%3E%3C/g%3E"
+    "%3Ccircle cx='30.6' cy='10.6' r='2.8' stroke='%23c8633a' stroke-width='3.4'"
+    " fill='%23fbfbfa'/%3E%3C/svg%3E"
+)
+
 _PAGE = """
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ghlore</title>
+<link rel="icon" href="/*FAVICON*/">
 <style>
   :root {
     color-scheme: light dark;
@@ -54,7 +73,9 @@ _PAGE = """
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); }
   main { max-width: 60rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
-  h1 { font-size: 1.1rem; margin: 0 0 .25rem; letter-spacing: .02em; }
+  h1 { font-size: 1.1rem; margin: 0 0 .25rem; letter-spacing: .02em;
+       display: flex; align-items: center; gap: .5rem; }
+  h1 .mark { flex: none; }
   h1 small { color: var(--dim); font-weight: 400; }
   form { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0 .5rem; }
   input, select, button, textarea {
@@ -106,8 +127,14 @@ _PAGE = """
      one line per pass is the only shape that stays readable past two repositories. */
   .strip .passes { flex-basis: 100%; display: flex; flex-direction: column; gap: .15rem;
                    margin-top: .35rem; }
-  .strip .pass { font-variant-numeric: tabular-nums; }
+  .strip .pass { font-variant-numeric: tabular-nums; padding-left: .75rem; }
+  .strip .repo { display: flex; flex-direction: column; gap: .15rem; margin-top: .35rem; }
+  .strip .repo-name { font-weight: 600; }
   .warn-text { color: var(--warn); }
+  .dim-text { color: var(--dim); }
+  /* A pass that is working right now. The page polls health, so this appears and goes
+     without anybody reloading. */
+  .working { color: var(--accent); }
 
   details.guide { margin: 1rem 0; border: 1px solid var(--line); border-radius: 4px;
                   background: var(--card); }
@@ -125,7 +152,28 @@ _PAGE = """
 </style>
 
 <main>
-  <h1>ghlore <small id="backend">…</small></h1>
+  <h1>
+    <!-- The mark from docs/ghlore.png, redrawn rather than embedded: the PNG is 1448px
+         and 717KB of mostly white margin, and its ink is a fixed dark that disappears
+         on this page's dark theme. As geometry it is under 1KB, sharp on any display,
+         and `currentColor` makes it follow the theme the way the wordmark does. Below
+         about 30px the node rings close up, so the size is not a free choice. -->
+    <svg class="mark" viewBox="0 0 40 44" width="27" height="30" aria-hidden="true"
+         fill="none" stroke-linecap="round">
+      <path d="M0 30.2 Q7.4 27.2 14.7 31.4 T36 26.6" stroke="#beb2a7" stroke-width="1.7"/>
+      <path d="M0 34.6 Q7.4 31.6 14.7 35.8 T36 31" stroke="#c8633a" stroke-width="1.7"/>
+      <path d="M0 39 Q7.4 36 14.7 40.2 T36 35.4" stroke="currentColor" stroke-width="1.7"/>
+      <path d="M14.7 3.3 V31.4" stroke="currentColor" stroke-width="2.6"/>
+      <path d="M14.7 18.5 Q23.4 18.5 28.4 12.4" stroke="currentColor" stroke-width="2.6"/>
+      <g stroke="currentColor" stroke-width="2.7" fill="var(--bg)">
+        <circle cx="14.7" cy="3.3" r="2.65"/>
+        <circle cx="14.7" cy="18.5" r="2.65"/>
+        <circle cx="14.7" cy="31.4" r="2.65"/>
+      </g>
+      <circle cx="30.6" cy="10.6" r="2.35" stroke="#c8633a" stroke-width="2.1" fill="var(--bg)"/>
+    </svg>
+    <span>ghlore <small id="backend">…</small></span>
+  </h1>
 
   <!-- Shown only once the daemon has actually refused us. A page that opens by
        demanding a token teaches nothing; a page that opens with a raw 401 JSON blob
@@ -267,6 +315,15 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
 const split = (s) => String(s || "").split(",").map((x) => x.trim()).filter(Boolean);
 const quote = (s) => /[\\s"']/.test(s) ? "'" + String(s).replace(/'/g, "'\\\\''") + "'" : s;
 const short = (iso) => iso ? String(iso).slice(0, 16).replace("T", " ") : "never";
+// "8s ago" answers the question a timestamp only helps you compute: is this thing moving?
+const ago = (iso) => {
+  if (!iso) return "never";
+  const seconds = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  for (const [unit, size] of [["d", 86400], ["h", 3600], ["m", 60]]) {
+    if (seconds >= size) return `${Math.floor(seconds / size)}${unit} ago`;
+  }
+  return `${Math.floor(seconds)}s ago`;
+};
 
 const token = $("#token");
 token.value = localStorage.getItem("ghlore-token") || "";
@@ -342,9 +399,36 @@ async function health() {
     $("#backend").textContent =
       s.backend.name + " / " + s.backend.ranking + " · v" + s.version;
     const n = (v) => Number(v).toLocaleString();
-    const passes = (s.passes || []).map((p) =>
-      `<span class="pass">${esc(p.repo)} <b>${esc(p.pass)}</b>` +
-      ` high-water ${short(p.high_water)} · ok ${short(p.last_ok_at)}</span>`).join("");
+    // Grouped by repository, because the flat list interleaved them: with three repos
+    // and five passes each, finding "is transformers current" meant reading fifteen
+    // lines in an order nobody chose. And a pass that is *working right now* says so --
+    // `last_run_at` moves per committed thread while `last_ok_at` moves only when the
+    // pass finishes, so a run newer than the ok is a pass in flight, and a cursor says
+    // how far it got. Stale is the same signal read later, which is why the age is
+    // printed rather than a bare timestamp: "8s ago" is running, "2d ago" is stopped.
+    const byRepo = new Map();
+    for (const p of s.passes || []) {
+      if (!byRepo.has(p.repo)) byRepo.set(p.repo, []);
+      byRepo.get(p.repo).push(p);
+    }
+    const working = (p) =>
+      p.last_run_at && (!p.last_ok_at || p.last_run_at > p.last_ok_at);
+    const passes = [...byRepo.entries()].sort().map(([repo, rows]) => {
+      const live = rows.filter(working);
+      const lines = rows.sort((a, b) => a.pass.localeCompare(b.pass)).map((p) => {
+        const at = p.cursor ? ` · at ${esc(p.cursor)}` : "";
+        const state = working(p)
+          ? `<b class="working">indexing</b> ${ago(p.last_run_at)}${at}`
+          : `ok ${short(p.last_ok_at)}`;
+        return `<span class="pass"><b>${esc(p.pass)}</b>` +
+               ` high-water ${short(p.high_water)} · ${state}</span>`;
+      }).join("");
+      const badge = live.length
+        ? `<b class="working">${live.length} indexing</b>`
+        : `<span class="dim-text">idle</span>`;
+      return `<div class="repo"><div class="repo-name">${esc(repo)} ${badge}</div>` +
+             `${lines}</div>`;
+    }).join("");
     const sampled = (s.samples || []).map((x) =>
       `<span class="pass warn-text">sample: ${esc(x.repo)} ${esc(x.thread_type)}s` +
       ` from ${short(x.indexed_from)} only — NOT full history</span>`).join("");
@@ -562,6 +646,13 @@ document.addEventListener("click", async (event) => {
 });
 
 health();
+// The strip is a live view, not a snapshot: a pass that starts or finishes appears and
+// clears on its own, which is the whole point of showing what is indexing. Only while the
+// tab is visible -- `/api/v1/status` counts three large tables, and a background tab
+// paying for that every half minute is a cost nobody asked for.
+setInterval(() => {
+  if (document.visibilityState === "visible") health();
+}, 30000);
 </script>
 """
 
@@ -579,4 +670,5 @@ def page(*, auth_required: bool = True) -> str:
     """
     out = _PAGE if auth_required else _PAGE.replace("/*AUTH*/true", "/*AUTH*/false")
     out = out.replace('"/*VERSION*/0.0.0"', json.dumps(__version__))
+    out = out.replace("/*FAVICON*/", _FAVICON)
     return out.strip()
