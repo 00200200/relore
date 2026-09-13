@@ -1,6 +1,6 @@
 # ghlore — GitHub project memory
 
-**Search the decisions behind the code.**
+**Every codebase has lore. Make it searchable.**
 
 Index a repository's complete issue and pull-request history, and serve it back as
 searchable project memory for coding agents and humans.
