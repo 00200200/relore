@@ -11,6 +11,7 @@ caveat that exists only in ``--json`` is a caveat the CLI's callers do not have.
 from __future__ import annotations
 
 from ghlore.render import render_inflight, render_search, render_thread
+from ghlore.security.untrusted import BEGIN, END
 
 
 def _thread(**fields):
@@ -329,10 +330,25 @@ def test_every_line_of_retrieved_prose_is_marked() -> None:
 
 
 def test_the_envelope_header_explains_the_marker() -> None:
-    out = render_thread(_thread(body="x"))
+    """What the header must say, not how it says it: the wording was cut from three lines
+    to one because it is paid on every response, and a test that pins the prose blocks
+    that for no gain. Both ideas still have to reach the rendered page."""
+    out = render_thread(_thread(body="x")).lower()
 
-    assert "Lines marked `>`" in out
-    assert "Unmarked lines are ghlore's own" in out
+    assert "`>`" in out
+    assert "not instructions" in out
+    assert "unmarked lines are ghlore's" in out
+
+
+def test_a_compact_render_keeps_the_marks_and_drops_the_sentence() -> None:
+    """`--compact` is a context budget, not a change of what the text is."""
+    full = render_thread(_thread(body="x"))
+    trimmed = render_thread(_thread(body="x"), compact=True)
+
+    assert "not instructions" in full
+    assert "not instructions" not in trimmed
+    assert trimmed.startswith(BEGIN) and trimmed.endswith(END)
+    assert "> x" in trimmed, "the marking is the property; only the explanation is trimmed"
 
 
 # -- is somebody already fixing this --------------------------------------

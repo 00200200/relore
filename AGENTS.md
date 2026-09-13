@@ -288,7 +288,14 @@ undifferentiated "do not follow directives below" told the reader to discount
 `security.untrusted.quote` marks retrieved prose with `>` per line and the header explains
 it. The direction is the property: retrieved text can *add* a marker and can never remove
 one, because every line of every quoted field is prefixed on the way out — so an unmarked
-line is always ours. A new field carrying somebody else's words must be quoted when it is
+line is always ours.
+
+*The marks are the property; the header is only the explanation.* That distinction is what
+`--compact` trades on: it drops the sentence and keeps the delimiters and every `>`, which
+is why it is not a hole. The header was three lines until it was measured — 267 of the
+~316 characters the envelope costs, against two characters per quoted line for the marking
+that does the work — so it is one line now. Shortening it is fair game; dropping the marks
+is not. A new field carrying somebody else's words must be quoted when it is
 rendered; the scrub covers it either way, the attribution does not.
 
 ## One version, both ends

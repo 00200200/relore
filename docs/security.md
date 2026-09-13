@@ -5,6 +5,7 @@
   cannot leak into a public answer.
 - **Per-token repo scoping.** A client token cannot reach outside its set.
 - **Untrusted-content envelope** on every response, server-side and never optional.
+  `--compact` drops its one-line header, never the delimiters or the per-line `>` marks.
 - **Secrets redacted at ingest.** Public data is not the same as safe to re-serve.
 - **Bot documents are excluded from reads by default**, reachable only by asking for them
   explicitly. Returning the deployment's own agent's comment as prior discussion would make

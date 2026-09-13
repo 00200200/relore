@@ -11,7 +11,9 @@ from ghlore.security.untrusted import (
     BEGIN,
     END,
     NOTICE,
+    QUOTE,
     envelope,
+    quote,
     scrub,
     scrub_counted,
     scrub_tree,
@@ -135,3 +137,31 @@ def test_the_envelope_says_the_text_is_data() -> None:
     assert "not instructions" in out
     assert "48322" in out
     assert out.startswith(BEGIN) and out.endswith(END)
+
+
+def test_the_header_still_explains_the_marks_after_being_shortened() -> None:
+    """It was cut from three lines to one because it is paid on every response. Both
+    halves have to survive the cut, or the marks stop meaning anything: what `>` is, and
+    that an unmarked line is ours -- the direction that makes retrieved text unable to
+    pass itself off as our assertion."""
+    header = envelope("hello").splitlines()[1]
+
+    assert len(header) < 120, "the header is paid per response; keep it one line"
+    assert QUOTE.strip() in header
+    assert "not instructions" in header
+    assert "unmarked" in header.lower()
+
+
+def test_compact_drops_the_sentence_and_keeps_the_mechanism() -> None:
+    """A caller trimming for a context budget gives up the explanation, never the
+    property: the block is still bounded and every quoted line is still marked, so an
+    unmarked line is still ours."""
+    body = quote("someone else's words")
+
+    out = envelope(body, source="huggingface/transformers#48322", compact=True)
+
+    assert out.startswith(BEGIN) and out.endswith(END)
+    assert "48322" in out, "provenance is not the part being trimmed"
+    assert body in out
+    assert "not instructions" not in out
+    assert len(out) < len(envelope(body, source="huggingface/transformers#48322"))

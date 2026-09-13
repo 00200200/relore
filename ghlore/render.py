@@ -60,7 +60,7 @@ def render_search(
     body = [*header, ""]
     for index, hit in enumerate(hits, start=1):
         body += _hit_lines(index, hit, note=_passage_note(hit, hits))
-    return envelope("\n".join(body).rstrip())
+    return envelope("\n".join(body).rstrip(), compact=compact)
 
 
 def _hit_lines(index: int, hit: dict[str, Any], note: str = "") -> list[str]:
@@ -160,7 +160,7 @@ def render_thread(
             )
             + ")"
         )
-    return envelope("\n".join(lines).rstrip(), source=thread.get("url"))
+    return envelope("\n".join(lines).rstrip(), source=thread.get("url"), compact=compact)
 
 
 def _passage_note(hit: dict[str, Any], page: list[dict[str, Any]]) -> str:
