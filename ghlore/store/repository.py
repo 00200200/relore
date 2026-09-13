@@ -63,7 +63,24 @@ class SignalStats:
 
 
 def stage_raw(conn: Connection, repo: str, rows: list[dict[str, Any]]) -> None:
+    rows = [{**row, "payload": _without_nul(row["payload"])} for row in rows]
     upsert(conn, s.raw_objects, rows, key=("repo", "object_type", "object_id"))
+
+
+def _without_nul(payload: Any) -> Any:
+    """Drop U+0000 on the way into ``raw_objects`` -- the one place staging is not verbatim.
+
+    Postgres JSONB rejects it and SQLite does not, and the pass wedges at a thread it cannot
+    index (section 5.2 rule 5) rather than skipping it. `scrub` removes it at serve time
+    anyway, so no reader loses anything.
+    """
+    if isinstance(payload, str):
+        return payload.replace("\x00", "") if "\x00" in payload else payload
+    if isinstance(payload, dict):
+        return {key: _without_nul(value) for key, value in payload.items()}
+    if isinstance(payload, list):
+        return [_without_nul(value) for value in payload]
+    return payload
 
 
 def prune_raw(

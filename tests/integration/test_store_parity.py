@@ -174,6 +174,30 @@ def test_json_columns_round_trip(engine: Engine) -> None:
     assert got == payload
 
 
+def test_a_nul_byte_in_a_payload_is_stageable_on_both_dialects(engine: Engine) -> None:
+    """SQLite stores U+0000, Postgres JSONB refuses it -- and the pass wedges at the thread
+    it cannot index rather than skipping it."""
+    with engine.begin() as conn:
+        repo_layer.stage_raw(
+            conn,
+            "owner/name",
+            [
+                {
+                    "repo": "owner/name",
+                    "object_type": "issue_comment",
+                    "object_id": "1",
+                    "thread_number": 1,
+                    "payload": {"body": "token = ghp_\x00abc", "nested": ["a\x00b"]},
+                    "fetched_at": utcnow(),
+                    "github_updated_at": None,
+                }
+            ],
+        )
+    with engine.connect() as conn:
+        payload = conn.execute(select(s.raw_objects.c.payload)).scalar_one()
+    assert payload == {"body": "token = ghp_abc", "nested": ["ab"]}
+
+
 def test_the_high_water_mark_never_moves_backwards(engine: Engine) -> None:
     later = dt.datetime(2026, 5, 1, tzinfo=UTC)
     earlier = dt.datetime(2026, 1, 1, tzinfo=UTC)
