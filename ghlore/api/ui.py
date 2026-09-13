@@ -239,6 +239,22 @@ _PAGE = """
          claims.</p>
       <div class="samples" id="samples"></div>
 
+      <!-- `why` is the one verb a search box cannot express: its question is a *place*
+           in the tree, not words. Printing the examples would have taught it the way
+           the samples above were once printed -- and a query you have to retype is one
+           nobody tries -- so these run. -->
+      <h3>Why is this line the way it is?</h3>
+      <p><code>ghlore why PATH:LINE</code> blames the line, then answers from the index:
+         the pull request that carried the commit, and the review comments anchored near
+         it. Blame reads a clone of <b>HEAD</b>, so line numbers are today's.</p>
+      <form id="why-form">
+        <input name="at" placeholder="src/transformers/masking_utils.py:1" size="46">
+        <select name="repo"><option value="">pick a repository</option></select>
+        <button class="primary">why</button>
+      </form>
+      <div class="samples" id="why-samples"></div>
+      <pre id="why-out" hidden></pre>
+
       <div id="token-guide">
       <h3>Tokens</h3>
       <p>Every endpoint that returns content is scoped to a bearer token, so a daemon
@@ -442,12 +458,14 @@ async function health() {
     // because the first call may have been refused and the second is the one that knows --
     // and the current choice is restored, so re-checking does not silently drop a filter
     // the user set and then search something else.
-    const chooser = $("#search").repo;
     const known = [...new Set((s.passes || []).map((p) => p.repo))].sort();
-    const chosen = chooser.value;
-    chooser.innerHTML = `<option value="">all repositories</option>` +
-      known.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
-    if (known.includes(chosen)) chooser.value = chosen;
+    const options = known.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+    for (const [chooser, empty] of [[$("#search").repo, "all repositories"],
+                                    [$("#why-form").repo, "pick a repository"]]) {
+      const chosen = chooser.value;
+      chooser.innerHTML = `<option value="">${empty}</option>` + options;
+      if (known.includes(chosen)) chooser.value = chosen;
+    }
   } catch (e) {
     if (e.message === AUTH_HINT) wantToken(true);
     $("#health").innerHTML = `<span class="error">index health: ${esc(e.message)}</span>`;
@@ -467,6 +485,62 @@ const SAMPLES = [
   {label: "what did our own bots claim?",
    q: "review", trust: "machine"},
 ];
+
+// Real places in `transformers`, each answering a different shape of the question: what
+// a file is for, and what one line of logic was for. Line 1 is the stable one -- it is
+// the file's own introduction, and it cannot drift the way a line in the middle does
+// when the clone moves to a newer HEAD.
+const WHY_SAMPLES = [
+  {label: "what is this file for?",
+   at: "src/transformers/masking_utils.py:1", repo: "huggingface/transformers"},
+  {label: "why is this line written this way?",
+   at: "src/transformers/modeling_rope_utils.py:180", repo: "huggingface/transformers"},
+  {label: "a line from 2023 — blame still reaches it",
+   at: "src/transformers/models/llama/modeling_llama.py:1", repo: "huggingface/transformers"},
+];
+
+const whyForm = $("#why-form");
+$("#why-samples").innerHTML = WHY_SAMPLES.map((s, i) =>
+  `<button type="button" data-i="${i}">${esc(s.label)}</button>`).join("");
+$("#why-samples").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  const s = WHY_SAMPLES[Number(button.dataset.i)];
+  whyForm.at.value = s.at;
+  // The repository is part of the example: the clone it blames is per repository, and a
+  // path from one answers 404 against another.
+  whyForm.repo.value = s.repo;
+  whyForm.requestSubmit();
+});
+
+whyForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const out = $("#why-out");
+  const at = String(whyForm.at.value || "").trim();
+  // Split on the LAST colon: a path may contain one, a line number may not.
+  const cut = at.lastIndexOf(":");
+  const path = cut > 0 ? at.slice(0, cut) : at;
+  const line = cut > 0 ? Number(at.slice(cut + 1)) : NaN;
+  if (!path || !Number.isInteger(line) || line < 1) {
+    out.hidden = false;
+    out.textContent = "Give it PATH:LINE, e.g. src/transformers/masking_utils.py:1";
+    return;
+  }
+  const query = new URLSearchParams({path, line: String(line), render: "true"});
+  if (whyForm.repo.value) query.set("repo", whyForm.repo.value);
+  out.hidden = false;
+  out.textContent = `why ${at} …`;
+  try {
+    const r = await fetch(`/api/v1/why?${query}`, {headers: headers()});
+    const body = await r.json();
+    // 503 is the designed answer for a repository with no clone, and 404 for a line that
+    // is not in the tree at HEAD. Both say what to do, so both are shown as themselves.
+    out.textContent = r.ok ? body.rendered : readable(r.status, body);
+    if (!r.ok && (r.status === 401 || r.status === 403)) wantToken(true);
+  } catch (e) {
+    out.textContent = String(e.message || e);
+  }
+});
 
 const form = $("#search");
 $("#samples").innerHTML = SAMPLES.map((s, i) =>
@@ -504,6 +578,8 @@ $("#agent-snippet").textContent =
   `This project's issue and PR history is indexed and searchable with \`ghlore\`.\n\n` +
   `Before you start work on an issue, check whether somebody already is:\n\n` +
   `    ghlore inflight <issue number>\n\n` +
+  `When one line is the question, ask about the line:\n\n` +
+  `    ghlore why <path>:<line>            # the PR that changed it, and the review on it\n\n` +
   `Before changing unfamiliar code, ask it why the code is the way it is:\n\n` +
   `    ghlore search "<the error, symbol, or question>" --kind failure|rationale|precedent\n` +
   `    ghlore search "<question>" --file <path>     # scope to a file\n` +
