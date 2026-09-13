@@ -29,6 +29,80 @@ def _thread(**fields):
     return {"thread": {**base, **fields}}
 
 
+# -- the piped grammar (issue #13) -----------------------------------------
+
+
+def test_the_piped_form_carries_no_advice_and_no_backend_tag() -> None:
+    """With no MCP server stdout is an API, so the piped form is a contract: facts only,
+    and nothing that moves when a flag is renamed."""
+    payload = {
+        "query": {"text": "rope"},
+        "backend": {"name": "postgresql", "ranking": "ts_rank_cd"},
+        "hits": [],
+    }
+
+    assert "[postgresql/ts_rank_cd]" not in render_search(payload)
+    assert "[postgresql/ts_rank_cd]" in render_search(payload, presentation=True)
+
+
+def test_a_hit_keeps_its_field_order_in_both_forms() -> None:
+    hit = {
+        "repo": "owner/name",
+        "number": 48630,
+        "type": "pr",
+        "trust": "authoritative",
+        "age": "3d",
+        "source_type": "review_comment",
+        "author": "ydshieh",
+        "snippet": "this cast is load-bearing",
+        "url": "https://github.com/owner/name/pull/48630",
+    }
+    payload = {"query": {"text": "cast"}, "backend": {}, "hits": [hit]}
+
+    for out in (render_search(payload), render_search(payload, presentation=True)):
+        head = [line for line in out.splitlines() if line.startswith("1. ")][0]
+        assert head.startswith("1. owner/name#48630 pr  [authoritative]  3d  review_comment")
+        assert head.endswith("@ydshieh")
+
+
+def test_an_unanswerable_inflight_states_the_fact_in_both_forms() -> None:
+    page = {"repo": "owner/name", "number": 1, "claims": [], "links_indexed": 0}
+
+    piped, terminal = render_inflight(page), render_inflight(page, presentation=True)
+    assert "no relationship rows at all" in piped and "no relationship rows at all" in terminal
+    assert "ghlored derive" not in piped
+    assert "ghlored derive" in terminal
+
+
+# -- events (issue #22) ----------------------------------------------------
+
+
+def test_a_closure_says_who_and_why() -> None:
+    out = render_thread(
+        _thread(author="truongsontung", state_reason="duplicate", closed_by="ydshieh")
+    )
+    assert "closed as duplicate by @ydshieh" in out
+
+
+def test_a_thread_closed_by_its_author_says_so() -> None:
+    out = render_thread(_thread(author="truongsontung", closed_by="truongsontung"))
+    assert "closed by its author" in out
+
+
+def test_a_review_decision_is_shown_with_no_comments_at_all() -> None:
+    """`-- 0 of 0 comments --` is true and cannot say whether nobody looked or nobody
+    typed. The decision is the only thing that separates them."""
+    out = render_thread(_thread(review_decision="approved", review_decision_by=["ydshieh"]))
+    assert "0 of 0 comments" in out
+    assert "review: approved by @ydshieh" in out
+
+
+def test_an_open_pull_request_nobody_has_reviewed_says_that() -> None:
+    out = render_thread(_thread(state="open", requested_reviewers=["vasqu"]))
+    assert "review: requested from @vasqu, no verdict yet" in out
+    assert "review: nobody has approved or blocked it" in render_thread(_thread(state="open"))
+
+
 # -- the changed-file list -------------------------------------------------
 
 
@@ -101,10 +175,13 @@ def test_a_thread_with_only_mentioned_paths_claims_no_diff() -> None:
 
 
 def test_a_truncated_body_says_how_much_is_missing_and_how_to_get_it() -> None:
-    out = render_thread(_thread(body="x" * 800, body_chars=5214, body_truncated=True))
+    payload = _thread(body="x" * 800, body_chars=5214, body_truncated=True)
 
-    assert "5214" in out
-    assert "--full" in out
+    piped = render_thread(payload)
+    assert "5214" in piped, "the cap is a fact, so it is in both forms"
+    assert "--full" not in piped
+
+    assert "--full" in render_thread(payload, presentation=True)
 
 
 def test_an_untruncated_body_is_quiet() -> None:
@@ -131,9 +208,10 @@ def test_a_focus_that_matched_nothing_says_so_next_to_the_comments() -> None:
 
 
 def test_an_unfocused_thread_still_suggests_a_focus() -> None:
-    out = render_thread(_thread(comments_returned=10, comments_total=30))
+    payload = _thread(comments_returned=10, comments_total=30)
 
-    assert "--focus" in out
+    assert "--focus" in render_thread(payload, presentation=True)
+    assert "20 not shown" in render_thread(payload), "the cap is a fact; the flag is advice"
 
 
 # -- what the ten comments actually are (huggingface/ghlore#16, #18) -------
@@ -143,10 +221,10 @@ def test_an_unfocused_page_says_it_is_a_sample_and_not_a_ranking() -> None:
     """`-- 10 of 89 comments --` is indistinguishable from a ranked top ten, and was read
     as one: the agent concluded the thread held nothing better and stopped, while the
     review that answered its question sat at position 51 of 97."""
-    out = render_thread(_thread(selection="ends+middle", comments_returned=10, comments_total=89))
+    payload = _thread(selection="ends+middle", comments_returned=10, comments_total=89)
 
-    assert "SAMPLED not ranked" in out
-    assert "--focus" in out
+    assert "SAMPLED not ranked" in render_thread(payload), "which ten these are is a fact"
+    assert "--focus" in render_thread(payload, presentation=True)
 
 
 def test_a_focused_page_is_not_called_a_sample() -> None:
@@ -288,6 +366,35 @@ def test_inflight_says_which_pull_request_and_what_state_it_is_in() -> None:
     assert "1 thread claims to close owner/name#48630" in out
     assert "open draft" in out  # a stale draft and an approved PR imply opposite actions
     assert "> fix: respect partial_rotary_factor" in out
+
+
+def test_inflight_says_how_a_closed_claimant_was_closed() -> None:
+    """#22: two claimants both reading `closed` was the whole ambiguity. Withdrawn by its
+    author means review the survivor; ruled a duplicate means read the triage."""
+
+    def claim(**fields):
+        base = {
+            "repo": "owner/name",
+            "number": 48672,
+            "type": "pr",
+            "title": "fix it",
+            "author": "truongsontung",
+            "state": "closed",
+            "draft": False,
+            "merged": False,
+            "age": "26h",
+            "relationship": "closes",
+        }
+        return {**base, **fields}
+
+    page = {"repo": "owner/name", "number": 48630, "claims_total": 2, "links_indexed": 12}
+    withdrawn = render_inflight({**page, "claims": [claim(closed_by="truongsontung")]})
+    duplicate = render_inflight(
+        {**page, "claims": [claim(state_reason="duplicate", closed_by="ydshieh")]}
+    )
+
+    assert "closed by its author" in withdrawn
+    assert "closed (duplicate) by @ydshieh" in duplicate
 
 
 def test_inflight_distinguishes_a_clean_answer_from_an_unanswerable_one() -> None:

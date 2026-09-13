@@ -284,6 +284,75 @@ project.
 
 ---
 
+## "Why is this line like this?" (#9)
+
+```
+$ ghlore why src/transformers/models/gpt_neox_japanese/modeling_gpt_neox_japanese.py:90 \
+    --repo huggingface/transformers
+```
+
+`git blame` gives the commit; this gives the argument. The daemon blames the line in its
+working clone, resolves the commit to a pull request through `thread_commits` — falling
+back to the `(#1234)` squash-merge subject, which it labels as a guess — and returns the
+thread with the review comments **anchored on or near that line**. That last part is what
+blame cannot give and what a clone cannot be asked for.
+
+Anchors are matched within a window of lines rather than exactly: GitHub stores an anchor
+as a name and we store a line number, so an exact match would drop every comment on a file
+edited since.
+
+Two empty answers that are not the same, and the page says which:
+
+- **no pull request carries that commit** — it predates the index, or reached the branch
+  outside a pull request;
+- **a pull request, and nobody reviewed this line** — the argument exists, just not here;
+  `ghlore thread` reads the rest of it.
+
+`why` needs the working clone below, because blame does. A `--depth 200` clone can read a
+file and cannot attribute a line, which is the hole every cost-minimising agent falls into.
+
+---
+
+## The same questions, asked of the server (#7)
+
+`defs` and `refs` take `--repo`, and `symbol`, `grep` and `copies` only exist there: they
+read the daemon's **working clone**, a blobless clone per indexed repository checked out at
+HEAD. That is the half of a diagnosis that used to end in `git clone --filter=blob:none
+--depth 200` and a throwaway script.
+
+```
+$ ghlore copies compute_default_rope_parameters --repo huggingface/transformers
+38 definitions of compute_default_rope_parameters in 2 shapes
+
+-- shape 1: 37 copies (the majority shape)
+   src/transformers/models/llama/modeling_llama.py:88
+   …
+-- shape 2: 1 copies
+   src/transformers/models/gpt_neox_japanese/modeling_gpt_neox_japanese.py:90
+
+$ ghlore grep 'partial_rotary_factor' --repo huggingface/transformers \
+    --path 'src/transformers/models/**/modeling_*.py'
+$ ghlore symbol GPTNeoXJapaneseRotaryEmbedding.forward --repo huggingface/transformers
+```
+
+`copies` groups by the body rather than listing definitions, because in a repository that
+duplicates model code on purpose the question is never *where is it* but *which copies
+diverge* — the shape of `huggingface/transformers#48630`. Indentation is normalized, so a
+function lifted into a class groups with its original.
+
+`symbol` prints how many definitions of that name exist. Serving the first of 38 as *the*
+body is a wrong answer a caller cannot see.
+
+**HEAD, not the tree as it was.** These verbs answer "what does this code look like now",
+which is what an audit asks. The lens that reads a comment's tree at the time it was
+written is a different depth and a separate decision.
+
+**A repository with no clone answers 503 with a sentence**, and the history verbs are
+unaffected: the conversation index never depends on a checkout. `ghlored clone --repo
+OWNER/NAME`, run where `ghlored serve` runs, creates one.
+
+---
+
 ## Empty results that are not faults
 
 **No results is always exit 0 with an empty result.** So when something comes back empty,
@@ -363,11 +432,20 @@ message says. If it instead says the daemon is **behind**, the client is fine an
 ## Parsing the output
 
 With no MCP server, stdout is the API, so what it prints is a contract rather than a
-rendering — and the contract is the same whether a person or a pipe is reading. **There is
-no TTY branch and there will not be one:** the text an agent reads and the text a person
-inspects have to be the same string, which is the same reason the renderer is server-side
-and shared with the web UI. A quiet mode for pipes would make the version nobody looks at
-the version everybody consumes.
+rendering.
+
+**There is one TTY branch, and it may only add advice** (#13). On a terminal the page also
+carries the backend tag and the flags worth trying next — `--full`, `--focus`, `ghlored
+derive`. Through a pipe, none of that is printed; `--plain` forces the piped form on a
+terminal.
+
+**Every fact is in both forms.** Counts, caps, truncation warnings, the sample-versus-ranked
+line, the trust tiers, the envelope and the `> ` marking are not presentation and do not
+move. This section used to say no branch could ever exist, because a quiet mode for pipes
+makes the version nobody looks at the version everybody consumes — and that reason is
+exactly why the split is advice-only: what a person sees is what a pipe sees plus
+suggestions, so the two cannot disagree about what is true. The renderer stays server-side
+and shared with the web UI for the same reason.
 
 **Prefer `--json`.** It carries everything the text does and nothing a caller has to
 un-format: the comments array, `body_chars`/`body_truncated`, the three file lists,
@@ -386,4 +464,12 @@ call, so "within a version" is something you can rely on rather than hope for:
 - counts and caveats are prose on their own line (`-- 10 of 89 comments … --`,
   `changed files: …`, `(body truncated: …)`), and a caveat is never dropped for brevity;
 - no score is printed. The order is the ranking, and the number's scale is a property of
-  the backend — it is in `--json` for whoever is tuning weights.
+  the backend — it is in `--json` for whoever is tuning weights;
+- `state_reason`, `closed_by`, `merged`, `review_decision` and `requested_reviewers` (#22)
+  render as their own lines under the header — `closed as duplicate by @login`, `closed by
+  its author`, `merged`, `review: approved by @login` — and as `closed (duplicate) by
+  @login` in an `inflight` row's state column. The review line is printed even when the
+  thread has no comments, which is the only thing that tells `-- 0 of 0 comments --` apart
+  from *approved without typing*;
+- fields are never reordered within a minor version, and the version is enforced on every
+  call, so a parser pinned to one version cannot be surprised by a cosmetic change.

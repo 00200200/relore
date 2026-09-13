@@ -23,6 +23,7 @@ from ghlore.search.queries import (
     Hit,
     InflightView,
     ThreadView,
+    WhyView,
 )
 
 
@@ -75,6 +76,13 @@ class SearchRequest(BaseModel):
             "also return the exact text the CLI would print, envelope included. What "
             "section 8's 'view as the model sees it' displays; off by default because an "
             "agent reading the JSON would be paying for the same content twice"
+        ),
+    )
+    presentation: bool = Field(
+        default=False,
+        description=(
+            "render for a person at a TTY: the same facts plus the backend tag and the "
+            "flags worth trying next. The CLI sends it when stdout is a terminal (#13)"
         ),
     )
     expand: bool = Field(
@@ -163,6 +171,9 @@ def inflight_json(view: InflightView) -> dict[str, Any]:
                 "state": claim.state,
                 "draft": claim.draft,
                 "merged": claim.merged,
+                "state_reason": claim.state_reason,
+                "closed_by": claim.closed_by,
+                "review_decision": claim.review_decision,
                 "age": claim.age,
                 "relationship": claim.relationship,
             }
@@ -171,6 +182,29 @@ def inflight_json(view: InflightView) -> dict[str, Any]:
         "claims_returned": len(view.claims),
         "claims_total": view.total,
         "links_indexed": view.links_indexed,
+    }
+
+
+def why_json(view: WhyView, *, blame: Any) -> dict[str, Any]:
+    """``GET /api/v1/why`` -- the commit, the pull request, and what was said on the line.
+
+    ``number: null`` and an empty ``anchored`` are different answers: no pull request could
+    be resolved for the commit, versus one was and nobody reviewed this line.
+    """
+    return {
+        "repo": view.repo,
+        "path": view.path,
+        "line": view.line,
+        "blame": {
+            "sha": blame.sha,
+            "author": blame.author,
+            "summary": blame.summary,
+            "text": blame.text,
+        },
+        "number": view.number,
+        "resolved_by": view.resolved_by,
+        "thread": thread_json(view.thread) if view.thread else None,
+        "anchored": [dict(comment) for comment in view.anchored],
     }
 
 
@@ -185,6 +219,13 @@ def thread_json(view: ThreadView, *, compact: bool = False) -> dict[str, Any]:
         "state": view.state,
         "age": view.age,
         "labels": list(view.labels),
+        # Events, not prose (issue #22).
+        "state_reason": view.state_reason,
+        "closed_by": view.closed_by,
+        "merged": view.merged,
+        "review_decision": view.review_decision,
+        "review_decision_by": list(view.review_decision_by),
+        "requested_reviewers": list(view.requested_reviewers),
         "body": view.body,
         # A cap a caller cannot see is a cap a caller reads as the whole document. `full`
         # serves the rest; these two say whether there is a rest.

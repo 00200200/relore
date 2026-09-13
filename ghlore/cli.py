@@ -8,7 +8,9 @@ Two verb families, deliberately in one binary:
   (:mod:`ghlore.wire` -- the two ship together and refuse to talk across a difference)
   and, if that daemon requires one, a token in ``GHLORE_TOKEN``.
 * **code verbs** (``map``, ``defs``, ``refs``) run locally against the working tree and
-  never touch the network, a database, or a token.
+  never touch the network, a database, or a token. ``defs`` and ``refs`` take ``--repo``
+  to ask the daemon's working clone instead, and ``symbol``, ``grep`` and ``copies``
+  exist only there (issue #7).
 
 This module must not import :mod:`ghlore.store`, :mod:`ghlore.github` or
 :mod:`ghlore.api`. That is asserted by ``tests/unit/test_module_boundary.py`` and it is
@@ -33,7 +35,13 @@ from urllib.parse import urlsplit
 
 from ghlore import __version__
 from ghlore.code.api import MissingParser
-from ghlore.render import render_inflight, render_search, render_status, render_thread
+from ghlore.render import (
+    render_inflight,
+    render_search,
+    render_status,
+    render_thread,
+    render_why,
+)
 from ghlore.wire import CLIENT_HEADER, SERVER_HEADER, UPGRADE_REQUIRED, explain
 
 API_ENV = "GHLORE_API"
@@ -52,7 +60,7 @@ TOKEN_ENVS = ("GHLORE_TOKEN", "GHLORE_API_TOKEN")
 # actionable only if the message says so, and :func:`_call` does.
 DEFAULT_API = "https://ghlore.huggingface.tech"
 
-_MILESTONE = {"precedent": 4, "why": 4, "map": 2, "defs": 2, "refs": 2}
+_MILESTONE = {"precedent": 4, "map": 2, "defs": 2, "refs": 2}
 
 
 def _also_after_the_verb(parser: argparse.ArgumentParser, *flags: str) -> None:
@@ -81,6 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument(
         "--compact", action="store_true", help="trim snippets for a tight context budget"
+    )
+    p.add_argument(
+        "--plain",
+        action="store_true",
+        help="the piped form even on a terminal: facts only, no suggestions (#13)",
     )
     p.add_argument(
         "--api",
@@ -166,9 +179,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     w = sub.add_parser(
         "why",
-        help=("(NOT IMPLEMENTED YET) review comments left on this line's code when it was written"),
+        help="the pull request that last changed this line, and what reviewers said on it",
     )
     w.add_argument("location", metavar="PATH:LINE")
+    w.add_argument("--repo", help="OWNER/NAME; needed when the token can see several")
     _also_after_the_verb(w, "--json")
 
     st = sub.add_parser("status", help="index freshness and coverage")
@@ -185,19 +199,40 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("path", nargs="?", default=".")
     _also_after_the_verb(m, "--json")
 
-    d = sub.add_parser("defs", help="definitions in a local file (no server)")
+    d = sub.add_parser("defs", help="definitions in a file, locally or with --repo")
     d.add_argument("path")
+    d.add_argument("--repo", help="OWNER/NAME; ask the daemon's working clone instead")
     _also_after_the_verb(d, "--json")
 
     r = sub.add_parser(
         "refs",
         help=(
-            "every occurrence of a symbol in the local checkout, by kind: call, "
-            "definition, attribute, name (no server)"
+            "every occurrence of a symbol, by kind: call, definition, attribute, name. "
+            "Local unless --repo"
         ),
     )
     r.add_argument("symbol")
+    r.add_argument("--repo", help="OWNER/NAME; ask the daemon's working clone instead")
     _also_after_the_verb(r, "--json")
+
+    sym = sub.add_parser("symbol", help="the source of one definition, from the daemon's clone")
+    sym.add_argument("qualname")
+    sym.add_argument("--repo", help="OWNER/NAME; needed when the token can see several")
+    _also_after_the_verb(sym, "--json")
+
+    g = sub.add_parser("grep", help="a regular expression over the daemon's working clone")
+    g.add_argument("pattern")
+    g.add_argument("--repo", help="OWNER/NAME; needed when the token can see several")
+    g.add_argument("--path", help="glob the paths must match, e.g. 'src/**/modeling_*.py'")
+    _also_after_the_verb(g, "--json")
+
+    c = sub.add_parser(
+        "copies",
+        help="every definition of a symbol, grouped by whether the bodies agree",
+    )
+    c.add_argument("symbol")
+    c.add_argument("--repo", help="OWNER/NAME; needed when the token can see several")
+    _also_after_the_verb(c, "--json")
 
     return p
 
@@ -208,10 +243,14 @@ def main(argv: list[str] | None = None) -> int:
         "search": _search,
         "thread": _thread,
         "inflight": _inflight,
+        "why": _why,
         "status": _status,
         "map": _map,
         "defs": _defs,
         "refs": _refs,
+        "symbol": _symbol,
+        "grep": _grep,
+        "copies": _copies,
     }.get(args.verb)
     if handler is None:
         raise SystemExit(
@@ -255,12 +294,16 @@ def _search(args: argparse.Namespace) -> int:
             # The server renders it, so the envelope a person inspects in the web UI and
             # the one an agent reads here are the same string from the same code.
             "render": not args.json,
+            "presentation": _presentation(args),
         },
     )
     return _emit(
         args,
         payload,
-        lambda: payload.get("rendered") or render_search(payload, compact=args.compact),
+        lambda: (
+            payload.get("rendered")
+            or render_search(payload, compact=args.compact, presentation=_presentation(args))
+        ),
     )
 
 
@@ -269,6 +312,7 @@ def _thread(args: argparse.Namespace) -> int:
         "focus": args.focus,
         "compact": str(args.compact).lower(),
         "render": str(not args.json).lower(),
+        "presentation": str(_presentation(args)).lower(),
         "full": str(args.full).lower(),
     }
     if args.repo:
@@ -277,7 +321,10 @@ def _thread(args: argparse.Namespace) -> int:
     return _emit(
         args,
         payload,
-        lambda: payload.get("rendered") or render_thread(payload, compact=args.compact),
+        lambda: (
+            payload.get("rendered")
+            or render_thread(payload, compact=args.compact, presentation=_presentation(args))
+        ),
     )
 
 
@@ -287,16 +334,56 @@ def _inflight(args: argparse.Namespace) -> int:
     Cheap, one hop, and it prevents the most expensive mistake an agent makes -- see
     :mod:`ghlore.ingest.relationships`.
     """
-    query = {"render": str(not args.json).lower()}
+    query = {
+        "render": str(not args.json).lower(),
+        "presentation": str(_presentation(args)).lower(),
+    }
     if args.repo:
         query["repo"] = args.repo
     payload = _call(args, "GET", f"/api/v1/inflight/{args.number}", params=query)
-    return _emit(args, payload, lambda: payload.get("rendered") or render_inflight(payload))
+    return _emit(
+        args,
+        payload,
+        lambda: (
+            payload.get("rendered") or render_inflight(payload, presentation=_presentation(args))
+        ),
+    )
+
+
+def _why(args: argparse.Namespace) -> int:
+    """`git blame` gives the commit; this gives the argument (issue #9)."""
+    path, _, line = args.location.rpartition(":")
+    if not path or not line.isdigit():
+        raise SystemExit(f"ghlore why: expected PATH:LINE, got {args.location!r}")
+    params = {
+        "path": path,
+        "line": line,
+        "render": str(not args.json).lower(),
+        "presentation": str(_presentation(args)).lower(),
+    }
+    if args.repo:
+        params["repo"] = args.repo
+    payload = _call(args, "GET", "/api/v1/why", params=params)
+    return _emit(
+        args,
+        payload,
+        lambda: payload.get("rendered") or render_why(payload, presentation=_presentation(args)),
+    )
 
 
 def _status(args: argparse.Namespace) -> int:
     payload = _call(args, "GET", "/api/v1/status")
     return _emit(args, payload, lambda: render_status(payload))
+
+
+def _presentation(args: argparse.Namespace) -> bool:
+    """Whether a person is reading this (#13).
+
+    The `git`/`gh` convention: a terminal gets the flags worth trying next, a pipe gets the
+    documented grammar and nothing else. `--plain` forces the pipe form for a script that
+    happens to own a TTY.
+    """
+    return sys.stdout.isatty() and not getattr(args, "plain", False)
 
 
 def _emit(args: argparse.Namespace, payload: dict[str, Any], text) -> int:
@@ -350,9 +437,20 @@ def _map(args: argparse.Namespace) -> int:
     return 0
 
 
+def _code_params(args: argparse.Namespace, **extra: Any) -> dict[str, str]:
+    params = {key: value for key, value in extra.items() if value}
+    if args.repo:
+        params["repo"] = args.repo
+    return params
+
+
 def _defs(args: argparse.Namespace) -> int:
     from ghlore.code.defs import definitions
     from ghlore.code.walk import read
+
+    if args.repo:
+        payload = _call(args, "GET", "/api/v1/code/defs", params=_code_params(args, path=args.path))
+        return _emit(args, payload, lambda: _defs_text(payload["definitions"]))
 
     source = read(args.path)
     if source is None:
@@ -361,18 +459,27 @@ def _defs(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps([vars(d) for d in found], indent=2))
         return 0
-    for definition in found:
-        extent = (
-            f"{definition.start_line}-{definition.end_line}"
-            if definition.end_line
-            else str(definition.start_line)
-        )
-        print(f"{extent:12} {definition.kind:9} {definition.qualname}")
+    print(_defs_text([vars(d) for d in found]))
     return 0
+
+
+def _defs_text(found: list[dict[str, Any]]) -> str:
+    lines = []
+    for definition in found:
+        end = definition.get("end_line")
+        extent = f"{definition['start_line']}-{end}" if end else str(definition["start_line"])
+        lines.append(f"{extent:12} {definition['kind']:9} {definition['qualname']}")
+    return "\n".join(lines)
 
 
 def _refs(args: argparse.Namespace) -> int:
     from ghlore.code.refs import references
+
+    if args.repo:
+        payload = _call(
+            args, "GET", "/api/v1/code/refs", params=_code_params(args, symbol=args.symbol)
+        )
+        return _emit(args, payload, lambda: _refs_text(payload))
 
     result = references(".", args.symbol)
     if args.json:
@@ -403,6 +510,77 @@ def _refs(args: argparse.Namespace) -> int:
             "claims were not searched)"
         )
     return 0
+
+
+def _refs_text(payload: dict[str, Any]) -> str:
+    hits = payload.get("hits") or []
+    lines = [f"{hit['path']}:{hit['line']}  {hit['kind']}" for hit in hits]
+    counts = ", ".join(f"{count} {kind}" for kind, count in (payload.get("by_kind") or {}).items())
+    lines.append(
+        f"-- {len(hits)} references at {payload.get('head', '')[:8]}"
+        + (f" ({counts})" if counts else "")
+    )
+    return "\n".join(lines)
+
+
+def _symbol(args: argparse.Namespace) -> int:
+    """The 18 lines that matter, without a clone (#7 item 2)."""
+    payload = _call(
+        args, "GET", "/api/v1/code/symbol", params=_code_params(args, qualname=args.qualname)
+    )
+    return _emit(args, payload, lambda: _symbol_text(payload))
+
+
+def _symbol_text(payload: dict[str, Any]) -> str:
+    head = f"{payload['path']}:{payload['start_line']}  {payload['kind']}  {payload['qualname']}"
+    total = payload.get("definitions_total", 1)
+    if total > 1:
+        # Serving one of many as *the* body is a wrong answer a caller cannot see.
+        head += f"\n({total} definitions of this name; `ghlore copies` groups them)"
+    return f"{head}\n{payload['body']}"
+
+
+def _grep(args: argparse.Namespace) -> int:
+    payload = _call(
+        args,
+        "GET",
+        "/api/v1/code/grep",
+        params=_code_params(args, pattern=args.pattern, path=args.path),
+    )
+    return _emit(args, payload, lambda: _grep_text(payload))
+
+
+def _grep_text(payload: dict[str, Any]) -> str:
+    hits = payload.get("hits") or []
+    lines = [f"{hit['path']}:{hit['line']}  {hit['text']}" for hit in hits]
+    lines.append(f"-- {len(hits)} in {payload.get('files_searched', 0)} files")
+    if payload.get("truncated"):
+        lines.append("   (capped: narrow it with --path)")
+    return "\n".join(lines)
+
+
+def _copies(args: argparse.Namespace) -> int:
+    """Which copies diverge -- the question a repository that duplicates code on purpose
+    actually asks (#7 item 4)."""
+    payload = _call(
+        args, "GET", "/api/v1/code/copies", params=_code_params(args, symbol=args.symbol)
+    )
+    return _emit(args, payload, lambda: _copies_text(payload))
+
+
+def _copies_text(payload: dict[str, Any]) -> str:
+    groups = payload.get("groups") or []
+    lines = [
+        f"{payload.get('total', 0)} definitions of {payload.get('symbol')} "
+        f"in {len(groups)} shape{'' if len(groups) == 1 else 's'}"
+    ]
+    for index, group in enumerate(groups, start=1):
+        note = " (the majority shape)" if index == 1 and len(groups) > 1 else ""
+        lines.append(f"\n-- shape {index}: {group['count']} copies{note}")
+        lines += [f"   {copy['path']}:{copy['start_line']}" for copy in group["copies"]]
+    if payload.get("truncated"):
+        lines.append("\n(capped.)")
+    return "\n".join(lines)
 
 
 # -- transport -------------------------------------------------------------

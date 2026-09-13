@@ -5,6 +5,13 @@ including the untrusted envelope and its delimiter scrubbing -- so that a format
 injection bug is caught by a person reading it rather than by an agent meeting it mid-task.
 Two renderers would drift, and the one that drifted would be the one nobody was looking at.
 
+**With no MCP server, stdout is an API** (#13), so the piped form is a contract:
+``presentation=False`` -- what a caller gets when stdout is not a TTY -- prints facts only,
+in a documented line grammar (``docs/cli.md``). ``presentation=True`` adds advice and
+diagnostics for the person at the terminal: the backend tag, `--full`, `--focus`,
+`ghlored derive`. **Facts are never presentation**, so every count, cap and caveat is in
+both forms; only the suggestions move.
+
 **Everything here takes plain dictionaries -- the JSON shapes of section 7 -- and imports
 nothing but the standard library.** That is what lets it live on both sides of the
 boundary: :mod:`ghlore.cli` may not reach a database driver or a web server (AGENTS.md
@@ -27,7 +34,9 @@ TRUST_LABEL = {
 }
 
 
-def render_search(payload: dict[str, Any], *, compact: bool = False) -> str:
+def render_search(
+    payload: dict[str, Any], *, compact: bool = False, presentation: bool = False
+) -> str:
     """The result page, wrapped in the envelope.
 
     Empty is not an error: no hits renders as a sentence saying so, still enveloped, still
@@ -39,7 +48,7 @@ def render_search(payload: dict[str, Any], *, compact: bool = False) -> str:
     header = [
         f"{len(hits)} hit{'' if len(hits) == 1 else 's'}"
         + (f" for {query.get('text')!r}" if query.get("text") else "")
-        + f"   [{backend.get('name', '?')}/{backend.get('ranking', '?')}]"
+        + (f"   [{backend.get('name', '?')}/{backend.get('ranking', '?')}]" if presentation else "")
     ]
     floor = query.get("trust_floor") or []
     if floor and floor != ["reported", "authoritative"]:
@@ -86,7 +95,9 @@ def _hit_lines(index: int, hit: dict[str, Any], note: str = "") -> list[str]:
     return lines
 
 
-def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
+def render_thread(
+    payload: dict[str, Any], *, compact: bool = False, presentation: bool = False
+) -> str:
     """One thread, with the cap stated rather than implied.
 
     A caller that cannot tell truncation from a quiet thread will read ten comments as the
@@ -100,6 +111,7 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
     ]
     if thread.get("author"):
         lines.append(f"opened by @{thread['author']}")
+    lines += _event_lines(thread)
     if thread.get("labels"):
         lines.append(f"labels: {', '.join(thread['labels'])}")
     lines += _file_lines(thread)
@@ -109,8 +121,14 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
     if thread.get("body_truncated"):
         lines.append(
             f"(body truncated: {len(thread.get('body') or '')} of "
-            f"{thread.get('body_chars')} characters. `--full` serves the rest, which on an "
-            "issue template is where the reproduction starts.)"
+            f"{thread.get('body_chars')} characters."
+            + (
+                " `--full` serves the rest, which on an issue template is where the "
+                "reproduction starts."
+                if presentation
+                else ""
+            )
+            + ")"
         )
     lines.append("")
 
@@ -135,7 +153,11 @@ def render_thread(payload: dict[str, Any], *, compact: bool = False) -> str:
     if total > returned:
         lines.append(
             f"({total - returned} not shown: a thread is never returnable in full."
-            + ("" if focus else ' `--focus "<what you care about>"` ranks all of them.')
+            + (
+                ' `--focus "<what you care about>"` ranks all of them.'
+                if presentation and not focus
+                else ""
+            )
             + ")"
         )
     return envelope("\n".join(lines).rstrip(), source=thread.get("url"))
@@ -164,6 +186,59 @@ def _passage_note(hit: dict[str, Any], page: list[dict[str, Any]]) -> str:
     if same > 1:
         parts.append(f"{same} of its passages are on this page")
     return "; ".join(parts)
+
+
+def _claim_state(claim: dict[str, Any]) -> list[str]:
+    """``closed (duplicate) by @maintainer`` rather than ``closed`` (issue #22).
+
+    Two claimants both reading ``closed`` is the state this verb is worst at: withdrawn by
+    its author means review the survivor, ruled a duplicate means read the triage.
+    """
+    if claim.get("merged"):
+        return [claim.get("state") or "", "merged"]
+    parts = [claim.get("state") or "", "draft" if claim.get("draft") else ""]
+    if claim.get("state") == "closed":
+        reason, closer = claim.get("state_reason"), claim.get("closed_by")
+        if reason and reason != "completed":
+            parts.append(f"({reason.replace('_', ' ')})")
+        if closer:
+            parts.append("by its author" if closer == claim.get("author") else f"by @{closer}")
+    elif claim.get("review_decision"):
+        parts.append(f"({claim['review_decision'].replace('_', ' ')})")
+    return parts
+
+
+def _event_lines(thread: dict[str, Any]) -> list[str]:
+    """How the thread got to its state, and what the reviewers settled (issue #22).
+
+    `closed` is the same word for *withdrawn by its author* and *ruled a duplicate*, which
+    imply opposite next actions; and a review decision is the only thing that tells
+    ``0 of 0 comments`` apart from *approved without typing*.
+    """
+    lines = []
+    if thread.get("merged"):
+        lines.append("merged")
+    elif thread.get("state") == "closed":
+        reason, closer = thread.get("state_reason"), thread.get("closed_by")
+        parts = ["closed"]
+        if reason and reason != "completed":
+            parts.append(f"as {reason.replace('_', ' ')}")
+        if closer:
+            parts.append("by its author" if closer == thread.get("author") else f"by @{closer}")
+        if len(parts) > 1:
+            lines.append(" ".join(parts))
+
+    decision, by = thread.get("review_decision"), thread.get("review_decision_by") or []
+    requested = thread.get("requested_reviewers") or []
+    if decision:
+        who = ", ".join(f"@{login}" for login in by)
+        lines.append(f"review: {decision.replace('_', ' ')}" + (f" by {who}" if who else ""))
+    elif requested:
+        who = ", ".join(f"@{login}" for login in requested)
+        lines.append(f"review: requested from {who}, no verdict yet")
+    elif thread.get("type") == "pr" and thread.get("state") == "open":
+        lines.append("review: nobody has approved or blocked it")
+    return lines
 
 
 def _link(link: dict[str, Any]) -> str:
@@ -241,7 +316,65 @@ def _file_lines(thread: dict[str, Any]) -> list[str]:
     return lines
 
 
-def render_inflight(payload: dict[str, Any]) -> str:
+def render_why(payload: dict[str, Any], *, presentation: bool = False) -> str:
+    """Why one line is the way it is (issue #9).
+
+    Blame's commit first, then the pull request that carried it, then the part blame
+    cannot give: what reviewers said *on this line* while it was being written.
+    """
+    blame = payload.get("blame") or {}
+    thread = payload.get("thread") or {}
+    lines = [
+        f"{payload.get('repo')} {payload.get('path')}:{payload.get('line')}",
+        quote(blame.get("text", "")),
+        "",
+        f"last changed in {blame.get('sha', '')[:12]} by {blame.get('author', 'someone')}",
+        quote(blame.get("summary", "")),
+    ]
+    if payload.get("number") is None:
+        lines.append(
+            "\nno pull request in this index carries that commit, so the argument behind "
+            "it is not retrievable here. It may predate the index, or have reached the "
+            "branch outside a pull request."
+        )
+        return envelope("\n".join(lines).rstrip())
+
+    guessed = (
+        " (from the commit subject, not a staged commit row)"
+        if (payload.get("resolved_by") == "summary")
+        else ""
+    )
+    lines += [
+        "",
+        f"{thread.get('repo')}#{payload['number']} {thread.get('state', '')}{guessed}",
+        quote(thread.get("title", "")),
+    ]
+    if thread.get("url"):
+        lines.append(thread["url"])
+    if thread.get("links"):
+        lines.append("links: " + ", ".join(_link(link) for link in thread["links"]))
+
+    anchored = payload.get("anchored") or []
+    lines += ["", f"-- {len(anchored)} review comment(s) on this line while it was written --"]
+    for index, comment in enumerate(anchored, start=1):
+        tier = TRUST_LABEL.get(str(comment.get("trust")), str(comment.get("trust")))
+        head = f"{index}. [{tier}]  {comment.get('age')}"
+        if comment.get("author"):
+            head += f"  @{comment['author']}"
+        if comment.get("line"):
+            head += f"  (line {comment['line']})"
+        lines += [head, quote(str(comment.get("text", "")))]
+        if comment.get("url"):
+            lines.append(f"   {comment['url']}")
+        lines.append("")
+    if not anchored and presentation:
+        lines.append(
+            "(nobody reviewed this line. `ghlore thread` reads the rest of the discussion.)"
+        )
+    return envelope("\n".join(lines).rstrip(), source=thread.get("url"))
+
+
+def render_inflight(payload: dict[str, Any], *, presentation: bool = False) -> str:
     """What already claims to close a thread.
 
     Empty is the answer this verb exists to give, so it has to be a sentence rather than a
@@ -257,22 +390,16 @@ def render_inflight(payload: dict[str, Any]) -> str:
         if not payload.get("links_indexed"):
             lines.append(
                 "(and this repository has no relationship rows at all, so that is not an "
-                "answer yet: re-derive it with `ghlored derive` to fill them.)"
+                "answer yet"
+                + (": re-derive it with `ghlored derive` to fill them" if presentation else "")
+                + ".)"
             )
         return envelope("\n".join(lines))
 
     claim_word = "thread claims" if total == 1 else "threads claim"
     lines = [f"{total} {claim_word} to close {subject}", ""]
     for index, claim in enumerate(claims, start=1):
-        state = " ".join(
-            part
-            for part in (
-                claim.get("state"),
-                "draft" if claim.get("draft") else "",
-                "merged" if claim.get("merged") else "",
-            )
-            if part
-        )
+        state = " ".join(part for part in _claim_state(claim) if part)
         head = (
             f"{index}. {claim.get('repo')}#{claim.get('number')} {claim.get('type')}  "
             f"{state}  {claim.get('age')}  {claim.get('relationship')}"
