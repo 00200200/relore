@@ -185,9 +185,13 @@ def test_the_per_pr_pass_visits_only_merged_prs(engine: Engine, fake: FakeGitHub
 
 
 def test_the_per_pr_pass_resumes_from_its_cursor(engine: Engine, fake: FakeGitHub) -> None:
+    """The cursor alone, with nothing staged: PR 2 is before it and must stay unvisited."""
     fake.add_pr(4, updated_at="2026-04-01T00:00:00Z", merged_at="2026-04-02T00:00:00Z")
     _run(engine, fake, graphql=True)
     with engine.begin() as conn:
+        # An interrupted first pass is the case this cursor exists for, so nothing is
+        # staged yet -- otherwise the skip below would decide the outcome, not the cursor.
+        conn.execute(s.raw_objects.delete().where(s.raw_objects.c.object_type == "pr_details"))
         repo_layer.set_cursor(conn, REPO, FILES_PASS, "2")
 
     result = _run(engine, fake, graphql=True)
@@ -196,6 +200,25 @@ def test_the_per_pr_pass_resumes_from_its_cursor(engine: Engine, fake: FakeGitHu
     assert files.staged == 1, "only PR 4 is after the cursor"
     with engine.connect() as conn:
         assert repo_layer.get_cursor(conn, REPO, FILES_PASS) is None
+
+
+def test_the_per_pr_pass_costs_only_the_prs_it_has_not_staged(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """Re-running it walked every merged PR again -- 20,429 on `transformers`, hours of
+    GraphQL points, to collect the handful the poll had found since. The poller stages no
+    detail, so that gap is real and has to be cheap enough to close on a timer."""
+    _run(engine, fake, graphql=True)
+    fake.add_pr(4, updated_at="2026-04-01T00:00:00Z", merged_at="2026-04-02T00:00:00Z")
+
+    result = _run(engine, fake, graphql=True)
+
+    files = next(p for p in result.passes if p.name == FILES_PASS)
+    assert files.staged == 1, "PR 2's detail is already staged; only PR 4 is new"
+
+    # And the escape hatch, for when the extraction changed rather than the corpus.
+    again = _run(engine, fake, graphql=True, refresh_details=True)
+    assert next(p for p in again.passes if p.name == FILES_PASS).staged == 2
 
 
 def test_review_bodies_are_not_duplicated_when_both_sources_have_them(

@@ -58,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip resolving MEMBER authors; every one of them stays `reported`",
     )
+    q.add_argument(
+        "--refresh-details",
+        action="store_true",
+        help="re-fetch per-PR detail already staged, instead of only PRs that lack it",
+    )
 
     q = sub.add_parser(
         "sample",
@@ -255,11 +260,22 @@ def _fetch(args: argparse.Namespace) -> int:
 
 def _backfill(args: argparse.Namespace) -> int:
     return _run_backfill(
-        args, derive=True, graphql=not args.no_graphql, authority=not args.no_authority
+        args,
+        derive=True,
+        graphql=not args.no_graphql,
+        authority=not args.no_authority,
+        refresh_details=args.refresh_details,
     )
 
 
-def _run_backfill(args: argparse.Namespace, *, derive: bool, graphql: bool, authority: bool) -> int:
+def _run_backfill(
+    args: argparse.Namespace,
+    *,
+    derive: bool,
+    graphql: bool,
+    authority: bool,
+    refresh_details: bool = False,
+) -> int:
     from ghlore.ingest.backfill import backfill
 
     engine = _engine()
@@ -275,6 +291,7 @@ def _run_backfill(args: argparse.Namespace, *, derive: bool, graphql: bool, auth
                 derive=derive,
                 gql=gql,
                 authority=authority,
+                refresh_details=refresh_details,
             )
         finally:
             if gql is not None:
@@ -406,7 +423,8 @@ def _staged_numbers(
 
 
 def _poll(args: argparse.Namespace) -> int:
-    from ghlore.ingest.poll import parse_interval, poll_forever, poll_once
+    from ghlore.duration import parse_interval
+    from ghlore.ingest.poll import poll_forever, poll_once
 
     engine = _engine()
     with _client() as client:

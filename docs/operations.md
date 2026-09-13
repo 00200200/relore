@@ -40,22 +40,36 @@ moved inside the window without the older comments that explain it (§5.5). A sa
 declares its floor and `ghlore status` prints it, because a recall number is only comparable
 against a baseline restricted to the same window.
 
+**`backfill --only files` is incremental.** It stages the merged PRs whose detail is not
+staged yet, so a daily run costs what merged that day rather than the whole history — and
+the poller stages no detail, so without it a PR first seen by polling carries no diff
+stats, no `merged_by` and no reviews. `--refresh-details` re-stages everything, for when
+the extraction changed rather than the corpus.
+
 `fetch` and `derive` are separate on purpose: raw payloads are staged, so improving an
 extractor and re-deriving costs minutes of local CPU instead of another day of API budget.
 `poll` does both for the threads that moved, so the split is invisible in steady state.
 
 ## The working clone (issue #7)
 
-`symbol`, `grep`, `copies` and `defs`/`refs --repo` read a clone per repository, checked out
-at HEAD and complete rather than filtered, so `why`'s blame never fetches mid-query. Create it **where `serve` runs** — that is the process answering them:
+`symbol`, `grep`, `copies` and `defs`/`refs --repo` read a clone per repository, checked
+out at HEAD and complete rather than filtered, so `why`'s blame never fetches mid-query.
+Create it **where `serve` runs** — that is the process answering them:
 
 ```bash
 export GHLORE_CLONE_ROOT=/var/lib/ghlore/clones   # default; a pod needs a volume for it
-ghlored clone --repo owner/name                   # also the refresh: re-run it on a timer
+export GHLORE_CLONE_REFRESH=1h                    # serve re-runs the fetch on this timer
+ghlored clone --repo owner/name                   # create; re-running it is the refresh
 ```
 
 Without one those verbs answer 503 with a sentence naming this command, and nothing else
 degrades — the index does not depend on a checkout.
+
+**`GHLORE_CLONE_REFRESH` is off by default**, and the refresh lives inside `serve` rather
+than in a CronJob: the clones volume is ReadWriteOnce and that process holds it, and a
+laptop has nothing to schedule with. It refreshes what is already cloned and never creates
+one — a repository added with `ghlored clone` joins on the next tick. Unset, HEAD ages
+until somebody re-runs the command.
 
 ## Serve
 

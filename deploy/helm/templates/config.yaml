@@ -33,6 +33,11 @@ data:
   # On the ConfigMap, not the serve container: an `exec`'d `ghlored clone` inherits it
   # and needs no `--root`. The poll pods read it and never clone.
   GHLORE_CLONE_ROOT: {{ .Values.clones.path | quote }}
+  {{- if .Values.clones.refresh }}
+  # `serve` re-fetches every existing clone on this timer. Empty leaves HEAD where
+  # `ghlored clone` put it.
+  GHLORE_CLONE_REFRESH: {{ .Values.clones.refresh | quote }}
+  {{- end }}
   {{- end }}
   {{- range $key, $value := .Values.extraEnv }}
   {{ $key }}: {{ $value | quote }}

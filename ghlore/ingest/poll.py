@@ -48,8 +48,6 @@ PASS = "threads"
 OVERLAP = dt.timedelta(seconds=60)
 
 _PR_NUMBER = re.compile(r"/pulls?/(\d+)")
-_INTERVAL = re.compile(r"^(\d+)([smhd])$")
-_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
 @dataclass
@@ -88,17 +86,6 @@ class PollResult:
     @property
     def clean(self) -> bool:
         return not self.failed and not self.capped
-
-
-def parse_interval(value: str) -> float:
-    """``5m`` -> 300.0. Accepts a bare number of seconds too."""
-    match = _INTERVAL.match(value.strip())
-    if match:
-        return float(match.group(1)) * _UNITS[match.group(2)]
-    try:
-        return float(value)
-    except ValueError as exc:
-        raise ValueError(f"cannot read {value!r} as an interval; try 30s, 5m, 2h") from exc
 
 
 def discover_moved(client: GitHubClient, repo: str, since: dt.datetime | None) -> Discovery:

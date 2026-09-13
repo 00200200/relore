@@ -46,9 +46,11 @@ from ghlore.api.tokens import LABEL_SCOPE, Authenticator, AuthError, RateLimited
 from ghlore.code.blame import blame_line
 from ghlore.code.clone import CloneUnavailable, WorkingClones
 from ghlore.code.defs import definitions
+from ghlore.code.refresh import REFRESH_ENV, start_refresh
 from ghlore.code.refs import references
 from ghlore.code.survey import copies, grep, symbol_body
 from ghlore.code.walk import read
+from ghlore.duration import parse_interval
 from ghlore.render import render_inflight, render_search, render_thread, render_why
 from ghlore.search import QueryError, SearchQuery, expand, open_backend, search_expanded
 from ghlore.search.queries import HUMAN_TRUST, admissible_trust
@@ -648,6 +650,18 @@ def serve(
 
     labels = os.environ.get(LABELS_ENV)
     app = build_app(engine, auth=auth, labels_path=Path(labels) if labels else None)
+
+    # Issue #7's clone ages by itself, and this process is the one that can refresh it:
+    # the volume is ReadWriteOnce and held here. Off unless asked for -- a `git fetch` is
+    # the one thing `serve` does that reaches the network, and that is a deployment's
+    # decision, not a default.
+    every = os.environ.get(REFRESH_ENV)
+    if every:
+        try:
+            start_refresh(app.state.deps.clones, parse_interval(every))
+        except ValueError as exc:
+            raise SystemExit(f"{REFRESH_ENV}: {exc}") from None
+
     trust_note = ", ".join(HUMAN_TRUST)
     log.info("serving %s on %s:%s (default trust tiers: %s)", url, host, port, trust_note)
     uvicorn.run(app, host=host, port=port, log_level="info")

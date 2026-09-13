@@ -90,6 +90,7 @@ def backfill(
     derive: bool = True,
     gql: GraphQLClient | None = None,
     authority: bool = True,
+    refresh_details: bool = False,
 ) -> BackfillResult:
     result = BackfillResult(repo=repo)
     for name, walker in BULK_PASSES:
@@ -104,7 +105,7 @@ def backfill(
     # Last, because it needs `threads.merged_at` -- which exists only once the thread walk
     # has been derived.
     if gql is not None and (not only or FILES_PASS in only):
-        files = _files_pass(engine, gql, repo)
+        files = _files_pass(engine, gql, repo, refresh=refresh_details)
         result.passes.append(files)
         result.documents_written += files.documents_written
     elif gql is None:
@@ -120,7 +121,9 @@ def backfill(
     return result
 
 
-def _files_pass(engine: Engine, gql: GraphQLClient, repo: str) -> PassResult:
+def _files_pass(
+    engine: Engine, gql: GraphQLClient, repo: str, *, refresh: bool = False
+) -> PassResult:
     """Reviews, changed files and commits for merged PRs, batched over GraphQL.
 
     Section 3's fourth constraint: there is no repository-wide reviews endpoint, so on the
@@ -130,11 +133,23 @@ def _files_pass(engine: Engine, gql: GraphQLClient, repo: str) -> PassResult:
     It derives each PR in the same transaction that stages it, rather than deferring to a
     second global derive pass: a kill costs one batch either way, and this way the index is
     never carrying staged detail nobody has read.
+
+    **PRs whose detail is already staged are skipped**, which is what makes a second run
+    cost the PRs merged since the first rather than the whole history again -- 20,429 of
+    them on `transformers`, hours of points, to collect the dozen the poll has since found.
+    The poller stages no detail (it runs the `threads` pass only), so those PRs carry no
+    diff stats, no `merged_by` and no reviews until this runs: cheap enough to schedule is
+    the difference between a gap that closes daily and one that closes when somebody
+    remembers. ``refresh`` re-stages everything, for when the *extraction* changed rather
+    than the corpus.
     """
     with engine.connect() as conn:
         resume = repo_layer.get_cursor(conn, repo, FILES_PASS)
         numbers = repo_layer.merged_pr_numbers(conn, repo, after=int(resume) if resume else None)
         authority = repo_layer.get_authority(conn, repo)
+        if not refresh:
+            staged = repo_layer.staged_object_ids(conn, repo, "pr_details")
+            numbers = [number for number in numbers if str(number) not in staged]
     if resume:
         log.info("%s: resuming the %s pass after PR %s", repo, FILES_PASS, resume)
     log.info("%s: %s pass over %d merged PRs", repo, FILES_PASS, len(numbers))

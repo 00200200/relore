@@ -145,6 +145,11 @@ clones:
   # `ghlore/code/clone.py` defaults to the same path. Setting it here is what makes the
   # pod agree with the code rather than happen to match it.
   path: /var/lib/ghlore/clones
+  # How often `serve` re-fetches them (30s, 5m, 2h). Empty means never, and then HEAD is
+  # as old as the last `ghlored clone` -- `grep` and `copies` still answer, about that
+  # tree. In `serve` and not a CronJob because the PVC is ReadWriteOnce and that pod
+  # holds it.
+  refresh: 1h
   storageClass: ""
   # Complete clones, so blame answers locally: transformers measures ~800MB against
   # ~180MB filtered. 10Gi is the three repositories several times over.
