@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from collections import Counter
 
+from ghlore.security.untrusted import strip_hidden
+
 # High-confidence patterns only. A greedy entropy heuristic over a corpus of tracebacks
 # and tensor dumps produces mostly false positives -- a known failure mode of secret
 # scanners on this kind of text (section 11.3). Every pattern here is anchored on a
@@ -58,7 +60,10 @@ def redact(markdown: str) -> tuple[str, Counter[str]]:
     mechanical and cheap to catch, not because it can be complete.
     """
     found: Counter[str] = Counter()
-    out = markdown
+    # The serve path drops invisible and control characters without a placeholder, so
+    # the text a reader gets has them gone: a secret split by one would miss the match
+    # here and be reassembled downstream. Strip first, on the same set, then match.
+    out = strip_hidden(markdown)
 
     for name, pattern in _SECRET_PATTERNS:
 

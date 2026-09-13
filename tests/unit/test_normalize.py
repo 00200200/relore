@@ -47,6 +47,27 @@ def test_nothing_to_redact_is_a_no_op() -> None:
     assert found == {}
 
 
+def test_a_secret_split_by_an_invisible_byte_is_still_redacted() -> None:
+    """Serve drops these bytes without a placeholder, so a token broken by one is
+    reassembled downstream unless the match runs on the text the reader gets.
+
+    The last two are line separators, which `scrub` does *not* drop -- `normalize` does,
+    on the way to ``body_text``. The set that has to be stripped before matching is
+    "every byte some layer removes", not "every byte this layer removes", and the
+    difference was a redaction that missed `ghp_` + U+2028 + 36 characters entirely.
+    """
+    secret = "ghp_" + "b" * 36
+    for glue in ("\u200b", "\u202e", "\x00", "\u2028", "\u2029"):
+        split = secret[:4] + glue + secret[4:]
+        clean, found = redact(split)
+        assert secret not in clean
+        assert "[REDACTED:github-token]" in clean
+        assert found == {"github-token": 1}
+        # The column full-text search matches and snippets are served from is the one
+        # that reassembled it, so assert on that rather than only on `redact`'s output.
+        assert secret not in normalize(clean)
+
+
 def test_normalize_strips_html_comments_and_link_targets() -> None:
     body = "<!-- bot metadata -->see [the docs](https://example.com/x) for more"
     assert normalize(body) == "see the docs for more"
