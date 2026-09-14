@@ -116,8 +116,9 @@ metadata:
   name: $job
   namespace: $namespace
   labels:
-    # `ghlore`, matching the release's own `app` label -- see deploy.sh. `logs.sh`
-    # selects on it, so a Job labelled `relore` would run and be unreadable.
+    # ghlore, matching the release's own app label -- see deploy.sh. logs.sh selects
+    # on it, so a Job labelled relore would run and be unreadable.
+    # (No backticks in this heredoc: it is unquoted, so they command-substitute.)
     app: ghlore
     component: pass
 spec:

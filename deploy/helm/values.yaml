@@ -114,6 +114,35 @@ poll:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {memory: 2Gi}
 
+# ---------------------------------------------------------------------------
+# The per-PR detail pass, on a schedule
+# ---------------------------------------------------------------------------
+# `relored backfill --only files` over every repository in `poll.repos`.
+#
+# It exists because the poller does NOT stage per-PR detail -- it runs the
+# `threads` pass only -- so diff stats, `merged_by` and GraphQL-only reviews stop
+# arriving the moment a backfill finishes. Five days after the transformers
+# backfill, 199 of the 204 PRs touched since had no changed-file rows, which is
+# `search --file` answering from a column that stopped five days ago.
+#
+# Cheap by construction: the pass skips PRs whose detail is already staged, so a
+# run costs what was merged since the last one. Enabled by default for that reason
+# -- a gap that closes daily rather than when somebody remembers.
+#
+# It does not cover OPEN pull requests: the pass walks merged ones only. That is
+# huggingface/relore#48 and it needs a code change, not a schedule.
+files:
+  enabled: true
+  # After the nightly backup (03:00) rather than alongside it: both touch the same
+  # database, and the dump is the one that must not be slowed down.
+  schedule: "0 4 * * *"
+  historyLimit: 3
+  # The pass is resumable and re-entrant, so a retry re-covers the remainder.
+  backoffLimit: 2
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 2Gi}
+
 # Section 6.2's bot-account list. `user.type == "Bot"` catches the accounts GitHub
 # knows are apps; these are the ones it does not. `HuggingFaceDocBuilderDev`
 # presents as `User` / `MEMBER`, so without listing it that account's boilerplate

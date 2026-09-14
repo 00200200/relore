@@ -1,0 +1,112 @@
+{{- if and .Values.files.enabled .Values.poll.repos }}
+#------------------------------------------------------------------------------
+# `relored backfill --only files` on a schedule -- the per-PR detail pass.
+#
+# **Why this exists at all.** A poller runs the `threads` pass and nothing else
+# (`ingest/poll.py`), so a pull request that first appears through polling carries
+# no diff stats, no `merged_by` and none of the reviews only GraphQL returns. On a
+# backfilled repository that detail arrives once, during the backfill, and then
+# never again -- the corpus keeps growing and the file lists stop. Measured on
+# 2026-09-14, five days after the transformers backfill: 199 of the 204 pull
+# requests touched since had no changed-file rows, so `search --file` was
+# answering "which threads touched this file" from a column that stopped five days
+# ago. `ingest/backfill.py` says it plainly -- *"cheap enough to schedule is the
+# difference between a gap that closes daily and one that closes when somebody
+# remembers"* -- and until this template it was not scheduled.
+#
+# **Why it is cheap.** `_files_pass` skips pull requests whose detail is already
+# staged, so a run costs the ones merged since the last run, not the history
+# again: the two catch-up runs on 2026-09-14 staged 39 objects for transformers
+# and 14 for trl, seconds each, against the hours a `--refresh-details` run would
+# take on 20,429 merged PRs.
+#
+# **What it does NOT fix**, because a schedule cannot: the pass walks *merged*
+# pull requests only, so open ones never get a file list from it. After both
+# catch-up runs, 152 open transformers PRs and 56 open trl PRs still had none.
+# That is the half of huggingface/relore#48 that needs a code change -- and it is
+# the half people feel, because "is somebody already touching this file" is a
+# question about open PRs. Do not read a green CronJob as that issue being closed.
+#
+# A CronJob and not a loop in the poller, deliberately. Section 4.1 wants one
+# writer per repository; this pass and the poll loop write different tables
+# (`raw_objects` + `thread_files` vs `threads`), but `Forbid` plus one Job at a
+# time keeps it to one detail writer regardless of how long a run takes. The repos
+# are walked *sequentially inside one Job* rather than one CronJob each, because
+# the GraphQL point budget is per token and per account: three concurrent passes
+# would contend for the same budget and fail together.
+#------------------------------------------------------------------------------
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "name" . }}-files
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.standard" . | nindent 4 }}
+    component: files
+spec:
+  schedule: {{ .Values.files.schedule | quote }}
+  # Never two detail passes at once. A run that overruns its schedule is a slow
+  # run, not a reason to start a second writer on the same cursor.
+  concurrencyPolicy: Forbid
+  # A pass that starts late is still worth running: it is resumable and skips what
+  # is already staged, so a missed window costs nothing but the delay.
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: {{ .Values.files.historyLimit }}
+  failedJobsHistoryLimit: {{ .Values.files.historyLimit }}
+  jobTemplate:
+    spec:
+      # The pass is resumable and re-entrant (`index_thread` makes re-processing a
+      # no-op), so a retry re-covers the remainder rather than starting over.
+      backoffLimit: {{ .Values.files.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "labels.standard" . | nindent 12 }}
+            component: files
+          annotations:
+            checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+        spec:
+          restartPolicy: OnFailure
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: files
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # Sequential, and a failure on one repository must not skip the
+                  # rest: record it, carry on, fail the Job at the end so the
+                  # failure is visible in `kubectl get cronjob` rather than only in
+                  # a log nobody reads.
+                  rc=0
+                  {{- range $repo := .Values.poll.repos }}
+                  echo "== {{ $repo }} =="
+                  relored {{ if ge (int $.Values.verbosity) 1 }}-v {{ end }}backfill \
+                    --repo {{ $repo | quote }} --only files || rc=1
+                  {{- end }}
+                  exit $rc
+              envFrom:
+                - configMapRef:
+                    name: {{ include "name" . }}-config
+                - secretRef:
+                    name: {{ .Values.existingSecret }}
+              env:
+                # Before the URL, same reason as every other workload here:
+                # Kubernetes expands `$(VAR)` only from the container's own `env`
+                # list, never from `envFrom`, so taking the password from the
+                # Secret via `envFrom` alone ships the literal `$(POSTGRES_PASSWORD)`
+                # in the connection string -- and fails at connect time, not at
+                # render time.
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.existingSecret }}
+                      key: POSTGRES_PASSWORD
+                - name: RELORE_DATABASE_URL
+                  value: {{ include "relore.databaseUrl" . | quote }}
+              resources: {{ toYaml .Values.files.resources | nindent 16 }}
+{{- end }}
