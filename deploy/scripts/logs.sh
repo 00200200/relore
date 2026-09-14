@@ -45,7 +45,11 @@ done
 kube=(kubectl --namespace "$namespace")
 [[ -n "$context" ]] && kube+=(--context "$context")
 
-selector="app=relore,component=${component}"
+# `app=ghlore`: the label the 2026-09-14 rename could not move, because it is the
+# Deployment selector and Kubernetes will not let an upgrade change one. With `relore`
+# here this script matched no pod and printed nothing -- which reads exactly like a
+# service that logged nothing.
+selector="app=ghlore,component=${component}"
 if [[ -n "$repo" ]]; then
   slug="$(echo "$repo" | tr '/.' '--' | tr '[:upper:]' '[:lower:]')"
   selector="${selector},repo=${slug}"

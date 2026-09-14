@@ -207,7 +207,7 @@ for workload in "deploy/${release}" "statefulset/${release}-postgres"; do
     --timeout="$timeout" || exit 1
 done
 for d in $(kubectl "${kube_ctx[@]}" --namespace "$namespace" get deploy \
-             -l "app=relore" -o name 2>/dev/null | grep -- "-poll-"); do
+             -l "app=ghlore" -o name 2>/dev/null | grep -- "-poll-"); do
   kubectl "${kube_ctx[@]}" --namespace "$namespace" rollout status "$d" --timeout="$timeout" || exit 1
 done
 
@@ -218,7 +218,11 @@ kube=(kubectl --namespace "$namespace")
 
 echo
 echo "== pods =="
-"${kube[@]}" get pods -l "app=relore" -o wide
+# `app=ghlore`, not `app=relore`: the label is the one name the 2026-09-14 rename could
+# not move, because it is the Deployment selector and Kubernetes rejects a change to it.
+# This line said `relore` for one deploy and matched nothing -- it printed "No resources
+# found" under a "== pods ==" heading, which reads as a verification that passed.
+"${kube[@]}" get pods -l "app=ghlore" -o wide
 echo
 echo "== index status =="
 # From inside the cluster, through the daemon's own reporting rather than by

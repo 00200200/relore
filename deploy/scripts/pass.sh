@@ -116,7 +116,9 @@ metadata:
   name: $job
   namespace: $namespace
   labels:
-    app: relore
+    # `ghlore`, matching the release's own `app` label -- see deploy.sh. `logs.sh`
+    # selects on it, so a Job labelled `relore` would run and be unreadable.
+    app: ghlore
     component: pass
 spec:
   # Generous: the pass is resumable, so a retry costs a re-walk of the remainder
@@ -127,7 +129,7 @@ spec:
   template:
     metadata:
       labels:
-        app: relore
+        app: ghlore
         component: pass
     spec:
       restartPolicy: OnFailure
