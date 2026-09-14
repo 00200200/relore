@@ -3,9 +3,12 @@
 A few weeks ago, Serge, one of the agents we use to maintain Transformers,
 spent 2.1 million input tokens on a single problem and produced no fix.
 
-It made 153 tool calls. 137 of them were re-reads of a file it had already
-opened, one of them 53 times. Those numbers are from our own job store, for one
-run of the nightly integration-failure triage.
+It made 153 tool calls. 137 of them re-opened a file it had already opened —
+`modular_blt.py` 53 times, a different slice of it each time. Those numbers are
+from our own job store, for one run of the nightly integration-failure triage.
+
+The calls themselves are cheap. What is expensive is the turn around each one,
+because every turn re-sends the whole conversation.
 
 The agent wasn't doing anything obviously wrong. Transformers is just a very
 large codebase, and reading it one file at a time is expensive.
@@ -135,21 +138,26 @@ It connects the code that exists today back to the discussion that shaped it.
 
 ## What that changes
 
-The run this post opened with made 153 tool calls, re-read files 137 times and
-produced no fix. It also had no way to ask about any of the history above: the
-agent's entire toolset was `grep`, `read_file`, `list_dir` and `fetch_url`, so
-every question in that list was unreachable from inside the task.
+The run this post opened with made 153 tool calls, 137 of them back into a file
+it had already opened, and produced no fix. It also had no way to ask about any
+of the history above: the agent's entire toolset was `grep`, `read_file`,
+`list_dir` and `fetch_url`, so every question in that list was unreachable from
+inside the task.
 
 The field-report run reached the root cause, the culprit PR and the already-open
 fix in about ten calls. A [later run](https://github.com/huggingface/relore/issues/58)
 on a bug it had never seen found the in-flight PR on its third call and came back
 with two findings that neither the issue nor that PR contained, without cloning
-the repository at all.
+the repository at all. Everything relore handed that session came to 25,767
+tokens — a median of 306 tokens per call, and less in total than three reads of
+the one file the triage job opened 53 times.
 
-Those are different bugs and different sessions, so it is a change of shape
-rather than a controlled benchmark. But the shape is the point: the questions
-that used to cost a hundred file reads, or that the agent simply could not ask,
-now cost a handful of calls each.
+Those are different bugs in different harnesses, so this is a change of shape
+rather than a controlled benchmark — and we are deliberately not putting a
+number opposite the 2.1M, because the total bill of an agent session is set by
+its harness and its turn count far more than by any one tool. The shape is the
+point: the questions that used to cost a hundred file visits, or that the agent
+simply could not ask, now cost a few hundred tokens each.
 
 ## Conclusion
 
