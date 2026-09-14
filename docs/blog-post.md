@@ -91,8 +91,8 @@ the repository, so an agent can move between “what did people say?” and “w
 does the code look like now?” without loading either world wholesale into its
 context.
 
-Not every piece of project history should carry the same weight. A maintainer
-explaining why an approach was rejected is different from a contributor
+Not every piece of project history should carry the same equally authoritative weight. 
+A maintainer explaining why an approach was rejected is different from a contributor
 speculating about a bug, or a bot posting generated text. relore keeps that
 provenance and exposes trust as part of search, so agents can restrict a query
 to authoritative sources when it matters.
@@ -116,17 +116,17 @@ During that investigation, every query was served from the local relore index—
 no GitHub API calls were made. GitHub is contacted by the ingestion process to
 keep the PostgreSQL index fresh, not by every agent doing a search.
 
-One of the queries we're experimenting with is making this connection even more direct:
+relore can make this connection more direct:
 
 ```
 relore why src/.../modeling_gpt_neox_japanese.py:90
 ```
 
-The idea is to go from a line in the current code to the commits, PRs, reviews
-and discussions that explain why it looks the way it does. git blame can tell
-you who changed a line and when; relore why aims to surface the decision behind
-it.
+`git blame` can tell you which commit last changed a line. `relore why` follows that commit back to the 
+pull request and surfaces the review comments around that line, the discussion 
+that can explain why the change was made.
 
+It connects the code that exists today with the decision that produced it.
 
 ## conclusion
 
