@@ -17,21 +17,22 @@ from fake_github import FakeGitHub
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 
-from ghlore import __version__
-from ghlore.api import ui
-from ghlore.api.server import build_app, serve
-from ghlore.api.tokens import LABEL_SCOPE, Authenticator, Token
-from ghlore.ingest.index_thread import index_thread
-from ghlore.search.queries import MAX_HITS, MAX_SNIPPET_CHARS
-from ghlore.security.untrusted import BEGIN, END, NOTICE
-from ghlore.wire import CLIENT_HEADER, SERVER_HEADER, UPGRADE_REQUIRED
+from relore import __version__
+from relore.api import ui
+from relore.api.server import build_app, serve
+from relore.api.tokens import LABEL_SCOPE, Authenticator, Token
+from relore.ingest.index_thread import index_thread
+from relore.render import render_search
+from relore.search.queries import MAX_HITS, MAX_SNIPPET_CHARS
+from relore.security.untrusted import BEGIN, END, NOTICE
+from relore.wire import CLIENT_HEADER, SERVER_HEADER, UPGRADE_REQUIRED
 
 REPO = "owner/name"
 
 
 def _serving(app) -> TestClient:
     """Every request declares its client version, because every real client does
-    (:mod:`ghlore.wire`). The handshake tests below override the header themselves."""
+    (:mod:`relore.wire`). The handshake tests below override the header themselves."""
     return TestClient(app, headers={CLIENT_HEADER: __version__})
 
 
@@ -55,6 +56,51 @@ def _search(client: TestClient, **body) -> dict:
     response = client.post("/api/v1/search", json=body)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def test_a_file_filtered_page_says_how_many_threads_it_could_not_test(
+    engine: Engine, fake: FakeGitHub, client: TestClient
+) -> None:
+    """A thread with no collected changed-file list is absent from a `--file` page without
+    ever having been tested against the path, which reads as a negative fact. `thread`
+    discloses that per row; the aggregate has to as well (huggingface/relore#48).
+
+    Both PRs mention the term. Neither has a changed-file list here -- nothing has run the
+    per-PR pass -- so the page is empty *and* has to say the filter could not decide."""
+    fake.add_pr(1, body="a crash in the decoder")
+    fake.add_pr(2, body="another crash in the decoder")
+    _index(engine, fake, 1, 2)
+
+    payload = _search(client, query="crash", files=["src/decoder.py"])
+
+    assert payload["count"] == 0
+    assert payload["files_untested"] == 2
+    assert "no collected changed-file list" in render_search(payload)
+
+
+def test_the_untested_count_ignores_issues(
+    engine: Engine, fake: FakeGitHub, client: TestClient
+) -> None:
+    """An issue has no diff and never will, so its absence from a `--file` page is the
+    right answer rather than a gap. Counting issues buries the real number: on the live
+    transformers index it was 19,460 issues against 4 open PRs actually missing a list."""
+    fake.add_issue(1, body="a crash in the decoder")
+    fake.add_pr(2, body="another crash in the decoder")
+    _index(engine, fake, 1, 2)
+
+    payload = _search(client, query="crash", files=["src/decoder.py"])
+
+    assert payload["files_untested"] == 1, "the PR only; the issue is not a gap"
+
+
+def test_the_untested_count_is_zero_without_a_file_filter(
+    engine: Engine, fake: FakeGitHub, client: TestClient
+) -> None:
+    """It is a caveat about `--file`, so it must not appear on a page that did not use it."""
+    fake.add_pr(1, body="a crash in the decoder")
+    _index(engine, fake, 1)
+
+    assert _search(client, query="crash")["files_untested"] == 0
 
 
 # -- the envelope ----------------------------------------------------------
@@ -338,6 +384,22 @@ def test_inflight_answers_for_a_number_the_index_has_never_seen(
     assert empty["claims"] == [] and empty["links_indexed"] == 1
 
 
+def test_inflight_renders_compact_when_asked(client: TestClient, engine: Engine, fake) -> None:
+    """The flag is accepted on every verb as of huggingface/relore#55, which means the
+    endpoints behind them have to take it -- an unknown query parameter is dropped by
+    FastAPI without a word, so a client sending `compact=true` to an endpoint that does not
+    read it gets the full page and no indication that its flag went nowhere."""
+    fake.add_pr(1, body="Fixes #999")
+    _index(engine, fake, 1)
+
+    full = client.get("/api/v1/inflight/999?render=true").json()["rendered"]
+    compact = client.get("/api/v1/inflight/999?render=true&compact=true").json()["rendered"]
+
+    assert "not instructions" in full
+    assert "not instructions" not in compact
+    assert "#1" in compact, "the claim itself is not what a budget trims"
+
+
 def test_inflight_outside_the_scope_is_404_not_403(engine: Engine, fake) -> None:
     fake.add_pr(1, body="Fixes #2")
     _index(engine, fake, 1)
@@ -395,7 +457,7 @@ def test_status_says_which_passes_are_working_right_now(client: TestClient, engi
     finishes, and the cursor is cleared on completion. So run-after-ok is a pass in
     flight -- without the cursor in the payload the page could say "indexing" and not
     where it had got to."""
-    from ghlore.store import repository as repo_layer
+    from relore.store import repository as repo_layer
 
     with engine.begin() as conn:
         repo_layer.touch_pass(conn, "owner/name", "threads", ok=True)
@@ -418,7 +480,7 @@ def test_metrics_needs_no_token_and_carries_no_content(engine: Engine, fake) -> 
 
     body = client.get("/metrics").text
 
-    assert "ghlore_threads 1" in body
+    assert "relore_threads 1" in body
     assert "secret-looking" not in body
 
 
@@ -485,7 +547,7 @@ def test_a_daemon_with_tokens_still_explains_them(engine: Engine) -> None:
     body = guarded.get("/").text
 
     assert "/*AUTH*/true" in body
-    assert "GHLORE_API_TOKENS" in body
+    assert "RELORE_API_TOKENS" in body
 
 
 # -- the version handshake --------------------------------------------------
@@ -663,8 +725,8 @@ def test_serve_refuses_a_sqlite_url_without_the_flag() -> None:
 def test_serve_refuses_a_public_bind_with_no_tokens(monkeypatch, tmp_path) -> None:
     """A laptop should not have to mint a token to read its own index; an open index on a
     network is not a default anyone chose."""
-    monkeypatch.delenv("GHLORE_API_TOKENS", raising=False)
-    monkeypatch.delenv("GHLORE_API_TOKENS_FILE", raising=False)
+    monkeypatch.delenv("RELORE_API_TOKENS", raising=False)
+    monkeypatch.delenv("RELORE_API_TOKENS_FILE", raising=False)
 
     with pytest.raises(SystemExit, match="no tokens configured"):
         serve(f"sqlite:///{tmp_path / 'x.db'}", host="0.0.0.0", port=0, allow_sqlite=True)
@@ -682,8 +744,8 @@ def test_serve_binds_wide_without_tokens_only_when_told_the_network_is_the_perim
     It gets as far as binding, so the port is 0 and uvicorn is stubbed out; what is under
     test is the guard, not the server.
     """
-    monkeypatch.delenv("GHLORE_API_TOKENS", raising=False)
-    monkeypatch.delenv("GHLORE_API_TOKENS_FILE", raising=False)
+    monkeypatch.delenv("RELORE_API_TOKENS", raising=False)
+    monkeypatch.delenv("RELORE_API_TOKENS_FILE", raising=False)
     ran: dict[str, object] = {}
     import uvicorn
 

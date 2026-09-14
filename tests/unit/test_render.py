@@ -10,8 +10,14 @@ caveat that exists only in ``--json`` is a caveat the CLI's callers do not have.
 
 from __future__ import annotations
 
-from ghlore.render import render_inflight, render_search, render_thread
-from ghlore.security.untrusted import BEGIN, END
+from relore.render import (
+    COMPACT_CHARS,
+    render_inflight,
+    render_search,
+    render_thread,
+    render_why,
+)
+from relore.security.untrusted import BEGIN, END
 
 
 def _thread(**fields):
@@ -71,8 +77,8 @@ def test_an_unanswerable_inflight_states_the_fact_in_both_forms() -> None:
 
     piped, terminal = render_inflight(page), render_inflight(page, presentation=True)
     assert "no relationship rows at all" in piped and "no relationship rows at all" in terminal
-    assert "ghlored derive" not in piped
-    assert "ghlored derive" in terminal
+    assert "relored derive" not in piped
+    assert "relored derive" in terminal
 
 
 # -- events (issue #22) ----------------------------------------------------
@@ -118,6 +124,67 @@ def test_a_truncated_file_list_says_it_is_truncated() -> None:
 
     assert "100" in out and "323" in out
     assert "TRUNCATED" in out
+
+
+def test_a_truncated_file_list_names_the_path_it_was_cut_after() -> None:
+    """`100 of 323` reads as a spread. It is a prefix: the per-PR pass takes GitHub's first
+    page and GitHub serves a diff in path order, so everything sorting after the last
+    collected path is missing whether or not it was touched. On the thread this came from
+    the cut was at `lfm2_moe` and the one interesting model was `mistral4`
+    (huggingface/relore#56)."""
+    payload = _thread(
+        files_changed=["src/a/one.py", "src/a/two.py"], files_total=323, files_collected=2
+    )
+
+    for out in (render_thread(payload), render_thread(payload, compact=True)):
+        assert "cut after src/a/two.py" in out
+        assert "absent whether or not the thread touched it" in out
+
+
+def test_compact_serves_a_truncated_file_list_as_its_shape() -> None:
+    """Half of a compact `thread 39847` was 100 paths the line above them says prove
+    nothing by their absence -- a budget flag spending its budget on the one list nothing
+    may be concluded from (huggingface/relore#11, huggingface/relore#56)."""
+    paths = [f"src/transformers/models/m{i}/modeling_m{i}.py" for i in range(100)]
+    paths += ["tests/models/test_rope.py", "docs/source/en/rope.md"]
+    payload = _thread(files_changed=paths, files_total=323, files_collected=102)
+
+    full, out = render_thread(payload), render_thread(payload, compact=True)
+
+    assert "100 under src/transformers/ across 100 directories" in out
+    # The cut point stays -- it is a caveat, not a path in a list.
+    assert "modeling_m50.py" not in out, "the shape replaces the paths"
+    assert "paths omitted under --compact" in out
+    assert len(out) < len(full) / 3
+    # The count, the denominator and the caveat are facts, so `--compact` keeps them.
+    assert "102 of 323 collected" in out and "TRUNCATED" in out
+    assert "src/transformers/models/m0/modeling_m0.py" in full
+
+
+def test_compact_keeps_a_complete_file_list() -> None:
+    """The shape is what a list that cannot answer a membership question is worth. A
+    complete one can, and answering it is the whole of what the paths are for."""
+    payload = _thread(files_changed=["src/a.py", "src/b.py"], files_total=2, files_collected=2)
+
+    out = render_thread(payload, compact=True)
+
+    assert "src/a.py, src/b.py" in out
+    assert "paths omitted" not in out
+
+
+def test_the_shape_counts_directories_only_when_they_spread() -> None:
+    """One edited package and a sweep across thirty-three are the two readings the line
+    exists to separate; `across 1 directories` separates nothing and costs tokens."""
+    payload = _thread(
+        files_changed=["pkg/mod/a.py", "pkg/mod/b.py", "README.md"],
+        files_total=9,
+        files_collected=3,
+    )
+
+    out = render_thread(payload, compact=True)
+
+    assert "2 under pkg/mod/, 1 at the root" in out
+    assert "across" not in out.split("cut after")[1].split("(paths omitted")[0]
 
 
 def test_a_complete_file_list_does_not_cry_truncation() -> None:
@@ -215,7 +282,7 @@ def test_an_unfocused_thread_still_suggests_a_focus() -> None:
     assert "20 not shown" in render_thread(payload), "the cap is a fact; the flag is advice"
 
 
-# -- the tier filter, announced (huggingface/ghlore#28) -------------------
+# -- the tier filter, announced (huggingface/relore#28) -------------------
 
 
 def test_a_thread_whose_only_comment_is_a_bots_does_not_claim_to_be_empty() -> None:
@@ -266,7 +333,7 @@ def test_a_thread_with_nothing_suppressed_says_nothing_about_tiers() -> None:
     assert "machine-tier" not in out
 
 
-# -- freshness travels with the answer (huggingface/ghlore#32) ------------
+# -- freshness travels with the answer (huggingface/relore#32) ------------
 
 
 def test_the_comment_page_says_what_it_is_current_to() -> None:
@@ -285,7 +352,7 @@ def test_an_index_with_no_stamp_says_nothing_rather_than_none() -> None:
     assert "current to" not in render_thread(_thread(indexed_at=None))
 
 
-# -- what the ten comments actually are (huggingface/ghlore#16, #18) -------
+# -- what the ten comments actually are (huggingface/relore#16, #18) -------
 
 
 def test_an_unfocused_page_says_it_is_a_sample_and_not_a_ranking() -> None:
@@ -359,11 +426,11 @@ def test_no_hits_is_a_sentence_not_an_empty_page() -> None:
 # -- whose words are they --------------------------------------------------
 
 
-def test_ghlores_own_assertions_are_not_inside_the_quoted_span() -> None:
+def test_relores_own_assertions_are_not_inside_the_quoted_span() -> None:
     """The envelope wraps a whole page and most of it is ours. `[authoritative]` is the
     most load-bearing field in the output and it is an assertion, not a quotation, so it
     must not sit in an undifferentiated "do not trust the text below" region
-    (huggingface/ghlore#12)."""
+    (huggingface/relore#12)."""
     out = render_search(
         {
             "query": {"text": "rope"},
@@ -407,7 +474,7 @@ def test_the_envelope_header_explains_the_marker() -> None:
 
     assert "`>`" in out
     assert "not instructions" in out
-    assert "unmarked lines are ghlore's" in out
+    assert "unmarked lines are relore's" in out
 
 
 def test_a_compact_render_keeps_the_marks_and_drops_the_sentence() -> None:
@@ -494,3 +561,65 @@ def test_inflight_distinguishes_a_clean_answer_from_an_unanswerable_one() -> Non
     assert "nothing in the index claims to close" in clean
     assert "no relationship rows" not in clean
     assert "no relationship rows" in unanswerable
+
+
+# -- --compact, on every page that has one (huggingface/relore#55) ---------
+
+
+def test_the_compact_budget_is_the_one_the_server_applies_to_a_snippet() -> None:
+    """Two constants with one meaning: `render` may not import `relore.search` (the module
+    boundary), so the number is written twice and pinned here instead."""
+    from relore.search.queries import COMPACT_SNIPPET_CHARS
+
+    assert COMPACT_CHARS == COMPACT_SNIPPET_CHARS
+
+
+def _why(**fields):
+    base = {
+        "repo": "owner/name",
+        "path": "src/a.py",
+        "line": 90,
+        "number": 48630,
+        "blame": {
+            "sha": "abc123def456",
+            "author": "ydshieh",
+            "summary": "fix the cast",
+            "text": "x = 1",
+        },
+        "thread": {"repo": "owner/name", "state": "merged", "title": "the pull request"},
+        "anchored": [],
+    }
+    return {**base, **fields}
+
+
+def test_why_shortens_its_review_comments_under_compact_and_says_how_many() -> None:
+    """`why` accepted `--plain` and `--compact` nowhere before #55, and the review comments
+    are the only unbounded prose on its page. A reader who cannot tell a shortened comment
+    from a whole one reads the tail it never got as something nobody said."""
+    payload = _why(anchored=[{"trust": "authoritative", "age": "3d", "text": "b" * 500}])
+
+    full, out = render_why(payload), render_why(payload, compact=True)
+
+    assert f"1 comment shortened to {COMPACT_CHARS} characters by --compact" in out
+    assert len(out) < len(full)
+    # Still marked as somebody else's words, still inside the block: the budget changes
+    # what is shown, never what it is.
+    assert "> bbb" in out
+    assert out.startswith(BEGIN) and out.endswith(END)
+
+
+def test_a_short_review_comment_is_not_reported_as_shortened() -> None:
+    payload = _why(anchored=[{"trust": "authoritative", "age": "3d", "text": "LGTM"}])
+
+    assert "shortened" not in render_why(payload, compact=True)
+
+
+def test_compact_drops_the_envelope_sentence_on_why_and_inflight_too() -> None:
+    """It always did on `search` and `thread`. The flag was not accepted on these two at
+    all, so the one thing `--compact` does on every enveloped page did not happen here."""
+    page = {"repo": "owner/name", "number": 1, "claims": [], "links_indexed": 12}
+
+    assert "not instructions" in render_inflight(page)
+    assert "not instructions" not in render_inflight(page, compact=True)
+    assert "not instructions" in render_why(_why())
+    assert "not instructions" not in render_why(_why(), compact=True)
