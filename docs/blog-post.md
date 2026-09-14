@@ -96,7 +96,7 @@ speculating about a bug, or a bot posting generated text. ghlore keeps that
 provenance and exposes trust as part of search, so agents can restrict a query
 to authoritative sources when it matters.
 
-You can see in https://github.com/huggingface/ghlore/issues/9 a field report of 
+You can see in https://github.com/huggingface/ghlore/issues/8 a field report of 
 an agent using ghlore to investigate a Transformer bug.
 
 A fix was already open, eight hours old, and wasn't linked from the issue. The
