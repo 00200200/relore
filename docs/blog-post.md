@@ -1,4 +1,4 @@
-# ghlore - searching the decisions behind the code
+# relore - searching the decisions behind the code
 
 A few weeks ago, Serge, one of the agents we use to maintain Transformers,
 spent 2.1 million input tokens debugging a single problem.
@@ -24,16 +24,16 @@ Tools like ctags and tree-sitter solve this by providing a searchable symbols
 index, and you can find numerous projects out there that will do exactly 
 that and surface it in a CLI for your agent.
 
-So we started building a symbol index of our own and exposing it through a new tool: ghlore.
+So we started building a symbol index of our own and exposing it through a new tool: relore.
 
-In one of our field tests, the agent found that ghlore defs gave it a better
+In one of our field tests, the agent found that relore defs gave it a better
 overview of a file than reading the whole thing, using roughly 5% of the
 tokens.
 
 Instead of loading the implementation, the agent can first ask for its structure:
 
 ```
-ghlore defs path/to/model.py
+relore defs path/to/model.py
 ```
 
 and only read the parts it actually needs.
@@ -79,10 +79,10 @@ The agent then has to fetch and reread that thread to discover which comment
 matched, who wrote it, and when.
 
 
-## meet ghlore, an hybrid index
+## meet relore, an hybrid index
 
 
-ghlore is a searchable memory for a GitHub repository.
+relore (REpository LORE) is a searchable memory for a GitHub repository.
 
 It indexes issues, PRs, comments, reviews, commit messages and the
 relationships between them. Alongside that history it keeps a working clone of
@@ -92,17 +92,17 @@ context.
 
 Not every piece of project history should carry the same weight. A maintainer
 explaining why an approach was rejected is different from a contributor
-speculating about a bug, or a bot posting generated text. ghlore keeps that
+speculating about a bug, or a bot posting generated text. relore keeps that
 provenance and exposes trust as part of search, so agents can restrict a query
 to authoritative sources when it matters.
 
-You can see in https://github.com/huggingface/ghlore/issues/8 a field report of 
-an agent using ghlore to investigate a Transformer bug.
+You can see in https://github.com/huggingface/relore/issues/8 a field report of 
+an agent using relore to investigate a Transformer bug.
 
 A fix was already open, eight hours old, and wasn't linked from the issue. The
 agent was about to write another patch.
 
-On that bug, a cold agent using only ghlore --help did the following:
+On that bug, a cold agent using only relore --help did the following:
 
 - read the issue and immediately extracted the authoritative maintainer comment;
 - learned that the bug was part of a broader regression;
@@ -111,7 +111,7 @@ On that bug, a cold agent using only ghlore --help did the following:
 - found the refactor that introduced the regression;
 - then moved to code inspection for the repo-wide audit.
 
-During that investigation, every query was served from the local ghlore index—
+During that investigation, every query was served from the local relore index—
 no GitHub API calls were made. GitHub is contacted by the ingestion process to
 keep the PostgreSQL index fresh, not by every agent doing a search.
 
@@ -119,25 +119,25 @@ One of the queries we're experimenting with is making this connection even more 
 
 ```
 
-ghlore why src/.../modeling_gpt_neox_japanese.py:90
+relore why src/.../modeling_gpt_neox_japanese.py:90
 ```
 
 The idea is to go from a line in the current code to the commits, PRs, reviews
 and discussions that explain why it looks the way it does. git blame can tell
-you who changed a line and when; ghlore why aims to surface the decision behind
+you who changed a line and when; relore why aims to surface the decision behind
 it.
 
 
 ## conclusion
 
-We built ghlore because Serge needed a better way to remember Transformers. But
+We built relore because Serge needed a better way to remember Transformers. But
 there isn't anything Transformers-specific about the problem.
 
 Mature open-source projects accumulate years of decisions in issues, reviews
 and PR comments. Humans learn that lore slowly. Agents start every session
 knowing none of it.
 
-ghlore turns that history into something both can query, and connects it back
+relore turns that history into something both can query, and connects it back
 to the code that exists today.
 
 It's open source, Apache 2.0, and works on any GitHub repository you're willing
