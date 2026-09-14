@@ -37,9 +37,9 @@ first; this page is the long form.
 | `precedent` | completed units of work — milestone 4, a stub today |
 
 Global: `--json` for machine-readable output, `--compact` to trim snippets and shape a
-truncated changed-file list, `--plain` for
-the piped form on a terminal, `--api` to override `RELORE_API`. `--json` and `--compact` are
-accepted on **either side** of the verb. No results is exit 0 with an empty result, never
+truncated changed-file list, `--plain` for the piped form on a terminal, `--api` to
+override `RELORE_API`. All four are accepted on **every verb** and on **either side** of
+it (#55). No results is exit 0 with an empty result, never
 nonzero — so an agent cannot mistake "nothing in the index" for "the tool is broken".
 
 ### The environment
@@ -112,12 +112,26 @@ $ relore --compact search "429" --limit 2
    https://github.com/huggingface/serge/pull/92
 ```
 
-`--compact` and `--json` are global flags, accepted on **either side** of the verb:
+`--json`, `--compact`, `--plain` and `--api` are global flags, accepted on **every verb**
+and on **either side** of it:
 
 ```bash
 relore --compact search "429"      # both work
 relore search "429" --compact
+relore grep rotary_ndims --compact --repo huggingface/transformers   # every verb (#55)
 ```
+
+**Accepted everywhere; it trims what the verb has.** `--compact` shortens quoted prose —
+a search snippet, `why`'s review comments, `grep`'s matched lines — replaces a *truncated*
+changed-file list with its shape, and drops the envelope's explanatory sentence. It never
+drops a row, a count or a caveat, and where a verb prints one short row per result (`defs`,
+`refs`, `map`, `copies`, `status`) it has nothing to shorten and changes nothing.
+`relore symbol` is the deliberate exception: the body is the answer, so it is served whole
+under `--compact` too. Whatever is shortened is counted on the page, so a trimmed line is
+never mistaken for a short one.
+
+`--plain` is the piped form on a terminal: facts stay, suggestions go. The cap on a `grep`
+is a fact and is always printed; `narrow it with --path` is advice and is not.
 
 Every hit carries its **age** (`15d`) and its **trust tier** (`[authoritative]`). Age
 changes what a model concludes; authority changes it more (§6.2).
@@ -539,7 +553,7 @@ tells you which — that distinction is deliberate (§12).
 
 ```
 $ relore status
-version   0.3.9
+version   0.3.10
 backend   postgresql / ts_rank_cd  capabilities: fulltext, weighted
 schema    applied [1, 2, 3, 4, 5, 6, 7], pending []
 index     55168 threads, 517276 documents, 332 raw objects
@@ -603,7 +617,8 @@ un-format: the comments array, `body_chars`/`body_truncated`, the three file lis
 code verbs the same way: `grep` carries `files_searched` and `files_with_hits` separately,
 and `copies` carries `exact`, each group's `shape_hash` and `bodies`, and each copy's
 `body_hash`, `shape_hash` and `normalized`.
-`--json` and `--compact` are accepted on either side of the verb.
+All four globals — `--json`, `--compact`, `--plain`, `--api` — are accepted on every verb
+and on either side of it.
 
 If you do read the text, these hold within a version — and the version is enforced on every
 call, so "within a version" is something you can rely on rather than hope for:

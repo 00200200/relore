@@ -34,6 +34,27 @@ TRUST_LABEL = {
 }
 
 
+#: What ``--compact`` shortens one line of quoted prose to. The same budget the server
+#: applies to a search snippet (``relore.search.queries.COMPACT_SNIPPET_CHARS``), which is
+#: where a caller's expectation for the flag comes from -- spelled again rather than
+#: imported, because this module may not reach :mod:`relore.search` (AGENTS.md invariant 1)
+#: and ``test_render`` pins the two together so they cannot drift.
+COMPACT_CHARS = 160
+
+
+def trim(text: str, *, limit: int = COMPACT_CHARS) -> tuple[str, bool]:
+    """One line of prose, shortened for ``--compact``, and whether it was.
+
+    The flag returns a *second* value rather than quietly appending an ellipsis because a
+    shortened line has to be disclosed by whoever prints it: an agent that cannot tell a
+    trimmed line from a whole one reads the tail it never got as absent from the source,
+    which is the failure this project keeps re-finding (section 13.3).
+    """
+    if len(text) <= limit:
+        return text, False
+    return text[:limit].rstrip() + "…", True
+
+
 def render_search(
     payload: dict[str, Any], *, compact: bool = False, presentation: bool = False
 ) -> str:
@@ -439,11 +460,18 @@ def _path_shape(paths: list[str]) -> str:
     return ", ".join(parts)
 
 
-def render_why(payload: dict[str, Any], *, presentation: bool = False) -> str:
+def render_why(
+    payload: dict[str, Any], *, compact: bool = False, presentation: bool = False
+) -> str:
     """Why one line is the way it is (issue #9).
 
     Blame's commit first, then the pull request that carried it, then the part blame
     cannot give: what reviewers said *on this line* while it was being written.
+
+    The review comments are the only unbounded prose on this page, so they are what
+    ``--compact`` trims -- and every trimmed one is counted at the bottom, because a
+    reader who cannot tell a shortened comment from a whole one reads the tail it never
+    got as something nobody said (huggingface/relore#55).
     """
     blame = payload.get("blame") or {}
     thread = payload.get("thread") or {}
@@ -460,7 +488,7 @@ def render_why(payload: dict[str, Any], *, presentation: bool = False) -> str:
             "it is not retrievable here. It may predate the index, or have reached the "
             "branch outside a pull request."
         )
-        return envelope("\n".join(lines).rstrip())
+        return envelope("\n".join(lines).rstrip(), compact=compact)
 
     guessed = (
         " (from the commit subject, not a staged commit row)"
@@ -479,6 +507,7 @@ def render_why(payload: dict[str, Any], *, presentation: bool = False) -> str:
 
     anchored = payload.get("anchored") or []
     lines += ["", f"-- {len(anchored)} review comment(s) on this line while it was written --"]
+    trimmed = 0
     for index, comment in enumerate(anchored, start=1):
         tier = TRUST_LABEL.get(str(comment.get("trust")), str(comment.get("trust")))
         head = f"{index}. [{tier}]  {comment.get('age')}"
@@ -486,18 +515,31 @@ def render_why(payload: dict[str, Any], *, presentation: bool = False) -> str:
             head += f"  @{comment['author']}"
         if comment.get("line"):
             head += f"  (line {comment['line']})"
-        lines += [head, quote(str(comment.get("text", "")))]
+        text = str(comment.get("text", ""))
+        if compact:
+            text, was_trimmed = trim(text)
+            trimmed += was_trimmed
+        lines += [head, quote(text)]
         if comment.get("url"):
             lines.append(f"   {comment['url']}")
         lines.append("")
+    if trimmed:
+        lines.append(
+            f"({trimmed} comment{'' if trimmed == 1 else 's'} shortened to {COMPACT_CHARS} "
+            "characters by --compact"
+            + ("; `--json` serves them whole" if presentation else "")
+            + ")"
+        )
     if not anchored and presentation:
         lines.append(
             "(nobody reviewed this line. `relore thread` reads the rest of the discussion.)"
         )
-    return envelope("\n".join(lines).rstrip(), source=thread.get("url"))
+    return envelope("\n".join(lines).rstrip(), source=thread.get("url"), compact=compact)
 
 
-def render_inflight(payload: dict[str, Any], *, presentation: bool = False) -> str:
+def render_inflight(
+    payload: dict[str, Any], *, compact: bool = False, presentation: bool = False
+) -> str:
     """What already claims to close a thread.
 
     Empty is the answer this verb exists to give, so it has to be a sentence rather than a
@@ -517,7 +559,7 @@ def render_inflight(payload: dict[str, Any], *, presentation: bool = False) -> s
                 + (": re-derive it with `relored derive` to fill them" if presentation else "")
                 + ".)"
             )
-        return envelope("\n".join(lines))
+        return envelope("\n".join(lines), compact=compact)
 
     claim_word = "thread claims" if total == 1 else "threads claim"
     lines = [f"{total} {claim_word} to close {subject}", ""]
@@ -537,7 +579,7 @@ def render_inflight(payload: dict[str, Any], *, presentation: bool = False) -> s
         lines.append("")
     if total > len(claims):
         lines.append(f"({total - len(claims)} more, not shown.)")
-    return envelope("\n".join(lines).rstrip())
+    return envelope("\n".join(lines).rstrip(), compact=compact)
 
 
 def render_status(payload: dict[str, Any]) -> str:

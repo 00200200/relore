@@ -384,6 +384,22 @@ def test_inflight_answers_for_a_number_the_index_has_never_seen(
     assert empty["claims"] == [] and empty["links_indexed"] == 1
 
 
+def test_inflight_renders_compact_when_asked(client: TestClient, engine: Engine, fake) -> None:
+    """The flag is accepted on every verb as of huggingface/relore#55, which means the
+    endpoints behind them have to take it -- an unknown query parameter is dropped by
+    FastAPI without a word, so a client sending `compact=true` to an endpoint that does not
+    read it gets the full page and no indication that its flag went nowhere."""
+    fake.add_pr(1, body="Fixes #999")
+    _index(engine, fake, 1)
+
+    full = client.get("/api/v1/inflight/999?render=true").json()["rendered"]
+    compact = client.get("/api/v1/inflight/999?render=true&compact=true").json()["rendered"]
+
+    assert "not instructions" in full
+    assert "not instructions" not in compact
+    assert "#1" in compact, "the claim itself is not what a budget trims"
+
+
 def test_inflight_outside_the_scope_is_404_not_403(engine: Engine, fake) -> None:
     fake.add_pr(1, body="Fixes #2")
     _index(engine, fake, 1)

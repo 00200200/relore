@@ -308,6 +308,7 @@ def build_app(
         token: Caller,
         repo: str | None = None,
         render: bool = False,
+        compact: bool = False,
         presentation: bool = False,
     ) -> Response:
         """What already claims to close this thread (section 13.3).
@@ -321,7 +322,11 @@ def build_app(
         payload = {"notice": NOTICE, **inflight_json(view)}
         return _json(
             payload,
-            render=(lambda scrubbed: render_inflight(scrubbed, presentation=presentation))
+            render=(
+                lambda scrubbed: render_inflight(
+                    scrubbed, compact=compact, presentation=presentation
+                )
+            )
             if render
             else None,
         )
@@ -460,6 +465,7 @@ def build_app(
         line: int,
         repo: str | None = None,
         render: bool = False,
+        compact: bool = False,
         presentation: bool = False,
     ) -> Response:
         """Why this line is the way it is (issue #9): blame, then the argument.
@@ -478,7 +484,9 @@ def build_app(
         payload = {"notice": NOTICE, **why_json(view, blame=found)}
         return _json(
             payload,
-            render=(lambda scrubbed: render_why(scrubbed, presentation=presentation))
+            render=(
+                lambda scrubbed: render_why(scrubbed, compact=compact, presentation=presentation)
+            )
             if render
             else None,
         )

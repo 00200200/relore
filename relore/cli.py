@@ -40,11 +40,13 @@ from urllib.parse import urlsplit
 from relore import __version__, guidance
 from relore.code.api import MissingParser
 from relore.render import (
+    COMPACT_CHARS,
     render_inflight,
     render_search,
     render_status,
     render_thread,
     render_why,
+    trim,
 )
 from relore.wire import CLIENT_HEADER, SERVER_HEADER, UPGRADE_REQUIRED, explain
 
@@ -84,8 +86,39 @@ DEFAULT_API = "https://ghlore.huggingface.tech"
 _MILESTONE = {"precedent": 4, "map": 2, "defs": 2, "refs": 2}
 
 
-def _also_after_the_verb(parser: argparse.ArgumentParser, *flags: str) -> None:
-    """Accept a global flag after the subcommand as well as before it.
+#: The flags that mean the same thing whatever verb they follow, spelled once because
+#: spelling them per verb is what produced the matrix in huggingface/relore#55: `--json`
+#: reached all twelve, `--compact` three, `--plain` none. A flag that works after `thread`
+#: and not after `grep` has no rule a caller can learn, and the error calls it
+#: *unrecognized* rather than misplaced -- so the repair an agent reaches for is to delete
+#: the flag, which on `grep --compact` is the opposite of what it wanted.
+#:
+#: Adding one here puts it on the top-level parser and on every subparser at once. The
+#: help text is the top-level one; subparsers take the same flag hidden (see
+#: :func:`_also_after_the_verb`).
+GLOBAL_FLAGS: tuple[tuple[str, dict[str, Any]], ...] = (
+    ("--json", {"action": "store_true", "help": "machine-readable output"}),
+    (
+        "--compact",
+        {
+            "action": "store_true",
+            "help": "trim snippets, and a truncated changed-file list to its shape, for a "
+            "tight context budget",
+        },
+    ),
+    (
+        "--plain",
+        {
+            "action": "store_true",
+            "help": "the piped form even on a terminal: facts only, no suggestions (#13)",
+        },
+    ),
+    ("--api", {"help": f"the relored base URL (default: {API_ENV}, else {DEFAULT_API})"}),
+)
+
+
+def _also_after_the_verb(parser: argparse.ArgumentParser) -> None:
+    """Accept every global flag after the subcommand as well as before it.
 
     ``relore search ... --json`` is what anyone composing a command by analogy with
     ``git`` and ``gh`` writes, and argparse's answer to it was ``unrecognized arguments:
@@ -93,14 +126,25 @@ def _also_after_the_verb(parser: argparse.ArgumentParser, *flags: str) -> None:
     for a typo instead of moving it. Accepting it in both positions is cheaper than
     teaching every caller our own convention.
 
+    **Every global, not a list per verb.** The first version of this took the flags to
+    alias as arguments, and what it aliased drifted with whoever was adding a verb:
+    `--compact` reached `search`, `thread` and `precedent` -- the three verbs that existed
+    when huggingface/relore#6 was closed, one of them still a stub -- and not `grep`,
+    `symbol` or `copies`, whose output is the output most worth trimming (#55). So the
+    call site no longer chooses, and it is applied by walking ``sub.choices`` after the
+    verbs are built, which is what makes a verb added tomorrow arrive with all four.
+
     ``SUPPRESS`` is what makes the alias harmless: without it the subparser would write its
     own default over a flag given *before* the verb, silently turning ``relore --json
     search`` back off. Hidden from the subcommand's help, because it is already in the
     program's.
     """
-    for flag in flags:
+    for flag, spec in GLOBAL_FLAGS:
         parser.add_argument(
-            flag, action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+            flag,
+            **{key: value for key, value in spec.items() if key != "help"},
+            default=argparse.SUPPRESS,
+            help=argparse.SUPPRESS,
         )
 
 
@@ -122,23 +166,8 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--version", action="version", version=f"relore {__version__}")
-    p.add_argument("--json", action="store_true", help="machine-readable output")
-    p.add_argument(
-        "--compact",
-        action="store_true",
-        help="trim snippets, and a truncated changed-file list to its shape, for a "
-        "tight context budget",
-    )
-    p.add_argument(
-        "--plain",
-        action="store_true",
-        help="the piped form even on a terminal: facts only, no suggestions (#13)",
-    )
-    p.add_argument(
-        "--api",
-        default=None,
-        help=f"the relored base URL (default: {API_ENV}, else {DEFAULT_API})",
-    )
+    for flag, spec in GLOBAL_FLAGS:
+        p.add_argument(flag, **spec)
     sub = p.add_subparsers(dest="verb", required=True)
 
     s = sub.add_parser("search", help="search the indexed issue/PR history")
@@ -184,7 +213,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="ask exactly one question instead of fanning out over the query's parts",
     )
-    _also_after_the_verb(s, "--json", "--compact")
 
     t = sub.add_parser("thread", help="one thread, comments ranked by relevance")
     t.add_argument("number", type=int)
@@ -195,7 +223,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="serve the opening post whole instead of its first 800 characters",
     )
-    _also_after_the_verb(t, "--json", "--compact")
 
     inflight = sub.add_parser(
         "inflight",
@@ -203,7 +230,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inflight.add_argument("number", type=int)
     inflight.add_argument("--repo", help=_REPO_HELP)
-    _also_after_the_verb(inflight, "--json")
 
     pr = sub.add_parser(
         "precedent",
@@ -214,7 +240,6 @@ def build_parser() -> argparse.ArgumentParser:
     # Every other listing verb is limitable, so this one refusing `--limit` is a papercut
     # rather than a decision.
     pr.add_argument("--limit", type=int, default=5)
-    _also_after_the_verb(pr, "--json", "--compact")
 
     w = sub.add_parser(
         "why",
@@ -222,10 +247,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     w.add_argument("location", metavar="PATH:LINE")
     w.add_argument("--repo", help=_REPO_HELP)
-    _also_after_the_verb(w, "--json")
 
-    st = sub.add_parser("status", help="index freshness and coverage")
-    _also_after_the_verb(st, "--json")
+    sub.add_parser("status", help="index freshness and coverage")
 
     m = sub.add_parser(
         "map",
@@ -236,14 +259,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     m.add_argument("--limit", type=int, default=40)
     m.add_argument("path", nargs="?", default=".")
-    _also_after_the_verb(m, "--json")
 
     d = sub.add_parser("defs", help="definitions in a file, locally or with --repo")
     d.add_argument("path")
     d.add_argument(
         "--repo", help=f"OWNER/NAME; ask the daemon's working clone instead (default: ${REPO_ENV})"
     )
-    _also_after_the_verb(d, "--json")
 
     r = sub.add_parser(
         "refs",
@@ -256,18 +277,15 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument(
         "--repo", help=f"OWNER/NAME; ask the daemon's working clone instead (default: ${REPO_ENV})"
     )
-    _also_after_the_verb(r, "--json")
 
     sym = sub.add_parser("symbol", help="the source of one definition, from the daemon's clone")
     sym.add_argument("qualname")
     sym.add_argument("--repo", help=_REPO_HELP)
-    _also_after_the_verb(sym, "--json")
 
     g = sub.add_parser("grep", help="a regular expression over the daemon's working clone")
     g.add_argument("pattern")
     g.add_argument("--repo", help=_REPO_HELP)
     g.add_argument("--path", help="glob the paths must match, e.g. 'src/**/modeling_*.py'")
-    _also_after_the_verb(g, "--json")
 
     c = sub.add_parser(
         "copies",
@@ -280,7 +298,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="group by the body's exact text, annotations and docstrings included",
     )
-    _also_after_the_verb(c, "--json")
+
+    # Applied here, not at each `add_parser`: a verb cannot then be born missing a global,
+    # which is precisely how #55's matrix formed one `add_parser` at a time.
+    for verb_parser in sub.choices.values():
+        _also_after_the_verb(verb_parser)
 
     return p
 
@@ -414,6 +436,7 @@ def _inflight(args: argparse.Namespace) -> int:
     """
     query = {
         "render": str(not args.json).lower(),
+        "compact": str(args.compact).lower(),
         "presentation": str(_presentation(args)).lower(),
     }
     if repo := _repo(args):
@@ -423,7 +446,8 @@ def _inflight(args: argparse.Namespace) -> int:
         args,
         payload,
         lambda: (
-            payload.get("rendered") or render_inflight(payload, presentation=_presentation(args))
+            payload.get("rendered")
+            or render_inflight(payload, compact=args.compact, presentation=_presentation(args))
         ),
     )
 
@@ -437,6 +461,7 @@ def _why(args: argparse.Namespace) -> int:
         "path": path,
         "line": line,
         "render": str(not args.json).lower(),
+        "compact": str(args.compact).lower(),
         "presentation": str(_presentation(args)).lower(),
     }
     if repo := _repo(args):
@@ -445,7 +470,10 @@ def _why(args: argparse.Namespace) -> int:
     return _emit(
         args,
         payload,
-        lambda: payload.get("rendered") or render_why(payload, presentation=_presentation(args)),
+        lambda: (
+            payload.get("rendered")
+            or render_why(payload, compact=args.compact, presentation=_presentation(args))
+        ),
     )
 
 
@@ -612,15 +640,20 @@ def _symbol(args: argparse.Namespace) -> int:
     payload = _call(
         args, "GET", "/api/v1/code/symbol", params=_code_params(args, qualname=args.qualname)
     )
-    return _emit(args, payload, lambda: _symbol_text(payload))
+    return _emit(args, payload, lambda: _symbol_text(payload, presentation=_presentation(args)))
 
 
-def _symbol_text(payload: dict[str, Any]) -> str:
+def _symbol_text(payload: dict[str, Any], *, presentation: bool = False) -> str:
     head = f"{payload['path']}:{payload['start_line']}  {payload['kind']}  {payload['qualname']}"
     total = payload.get("definitions_total", 1)
     if total > 1:
-        # Serving one of many as *the* body is a wrong answer a caller cannot see.
-        head += f"\n({total} definitions of this name; `relore copies` groups them)"
+        # Serving one of many as *the* body is a wrong answer a caller cannot see. The
+        # count is the fact and is printed either way; the verb that groups them is advice.
+        head += f"\n({total} definitions of this name" + (
+            "; `relore copies` groups them)" if presentation else ")"
+        )
+    # NOT trimmed by `--compact`: the body is the answer this verb exists to give, and a
+    # silently shortened one is a wrong answer rather than a cheaper one.
     return f"{head}\n{payload['body']}"
 
 
@@ -631,10 +664,16 @@ def _grep(args: argparse.Namespace) -> int:
         "/api/v1/code/grep",
         params=_code_params(args, pattern=args.pattern, path=args.path),
     )
-    return _emit(args, payload, lambda: _grep_text(payload))
+    return _emit(
+        args,
+        payload,
+        lambda: _grep_text(payload, compact=args.compact, presentation=_presentation(args)),
+    )
 
 
-def _grep_text(payload: dict[str, Any]) -> str:
+def _grep_text(
+    payload: dict[str, Any], *, compact: bool = False, presentation: bool = False
+) -> str:
     """Both numbers named, because one of them used to mean the other thing (issue #37).
 
     The summary read ``-- 3 in 4 files``, where 4 was the count of files *searched*. The
@@ -645,17 +684,36 @@ def _grep_text(payload: dict[str, Any]) -> str:
 
     ``files_with_hits`` is counted from the hits rather than taken on faith, so it stays
     right for the capped answer too: it describes the rows printed below it.
+
+    The matched line is the one piece of unbounded text this verb prints -- a minified
+    bundle or a long tensor expression is one hit and 300 characters -- so it is what
+    ``--compact`` shortens, and the page says how many lines it shortened
+    (huggingface/relore#55). The cap is a fact and is printed either way; *how to narrow
+    it* is advice, so it belongs to the terminal form (#13).
     """
     hits = payload.get("hits") or []
-    lines = [f"{hit['path']}:{hit['line']}  {hit['text']}" for hit in hits]
+    lines, trimmed = [], 0
+    for hit in hits:
+        text = hit["text"]
+        if compact:
+            text, was_trimmed = trim(text)
+            trimmed += was_trimmed
+        lines.append(f"{hit['path']}:{hit['line']}  {text}")
     with_hits = len({hit["path"] for hit in hits})
     searched = payload.get("files_searched", 0)
     lines.append(
         f"-- {len(hits)} hit{'' if len(hits) == 1 else 's'} in {with_hits} of "
         f"{searched} file{'' if searched == 1 else 's'} searched"
     )
+    if trimmed:
+        lines.append(
+            f"   ({trimmed} line{'' if trimmed == 1 else 's'} shortened to {COMPACT_CHARS} "
+            "characters by --compact"
+            + ("; `--json` serves them whole" if presentation else "")
+            + ")"
+        )
     if payload.get("truncated"):
-        lines.append("   (capped: narrow it with --path)")
+        lines.append("   (capped" + (": narrow it with --path" if presentation else "") + ")")
     return "\n".join(lines)
 
 
@@ -668,10 +726,10 @@ def _copies(args: argparse.Namespace) -> int:
         "/api/v1/code/copies",
         params=_code_params(args, symbol=args.symbol, exact=str(args.exact).lower()),
     )
-    return _emit(args, payload, lambda: _copies_text(payload))
+    return _emit(args, payload, lambda: _copies_text(payload, presentation=_presentation(args)))
 
 
-def _copies_text(payload: dict[str, Any]) -> str:
+def _copies_text(payload: dict[str, Any], *, presentation: bool = False) -> str:
     """The grouping, and what was normalized away to reach it (issue #35).
 
     Two lines of disclosure rather than none, because the answer changed shape: a group is
@@ -693,7 +751,9 @@ def _copies_text(payload: dict[str, Any]) -> str:
     else:
         lines.append(
             "(grouped by what the body does: type annotations, docstrings and comments "
-            "are normalized away first — `--exact` groups by the text instead)"
+            "are normalized away first"
+            + (" — `--exact` groups by the text instead" if presentation else "")
+            + ")"
         )
     for index, group in enumerate(groups, start=1):
         count = group["count"]

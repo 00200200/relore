@@ -10,7 +10,13 @@ caveat that exists only in ``--json`` is a caveat the CLI's callers do not have.
 
 from __future__ import annotations
 
-from relore.render import render_inflight, render_search, render_thread
+from relore.render import (
+    COMPACT_CHARS,
+    render_inflight,
+    render_search,
+    render_thread,
+    render_why,
+)
 from relore.security.untrusted import BEGIN, END
 
 
@@ -555,3 +561,65 @@ def test_inflight_distinguishes_a_clean_answer_from_an_unanswerable_one() -> Non
     assert "nothing in the index claims to close" in clean
     assert "no relationship rows" not in clean
     assert "no relationship rows" in unanswerable
+
+
+# -- --compact, on every page that has one (huggingface/relore#55) ---------
+
+
+def test_the_compact_budget_is_the_one_the_server_applies_to_a_snippet() -> None:
+    """Two constants with one meaning: `render` may not import `relore.search` (the module
+    boundary), so the number is written twice and pinned here instead."""
+    from relore.search.queries import COMPACT_SNIPPET_CHARS
+
+    assert COMPACT_CHARS == COMPACT_SNIPPET_CHARS
+
+
+def _why(**fields):
+    base = {
+        "repo": "owner/name",
+        "path": "src/a.py",
+        "line": 90,
+        "number": 48630,
+        "blame": {
+            "sha": "abc123def456",
+            "author": "ydshieh",
+            "summary": "fix the cast",
+            "text": "x = 1",
+        },
+        "thread": {"repo": "owner/name", "state": "merged", "title": "the pull request"},
+        "anchored": [],
+    }
+    return {**base, **fields}
+
+
+def test_why_shortens_its_review_comments_under_compact_and_says_how_many() -> None:
+    """`why` accepted `--plain` and `--compact` nowhere before #55, and the review comments
+    are the only unbounded prose on its page. A reader who cannot tell a shortened comment
+    from a whole one reads the tail it never got as something nobody said."""
+    payload = _why(anchored=[{"trust": "authoritative", "age": "3d", "text": "b" * 500}])
+
+    full, out = render_why(payload), render_why(payload, compact=True)
+
+    assert f"1 comment shortened to {COMPACT_CHARS} characters by --compact" in out
+    assert len(out) < len(full)
+    # Still marked as somebody else's words, still inside the block: the budget changes
+    # what is shown, never what it is.
+    assert "> bbb" in out
+    assert out.startswith(BEGIN) and out.endswith(END)
+
+
+def test_a_short_review_comment_is_not_reported_as_shortened() -> None:
+    payload = _why(anchored=[{"trust": "authoritative", "age": "3d", "text": "LGTM"}])
+
+    assert "shortened" not in render_why(payload, compact=True)
+
+
+def test_compact_drops_the_envelope_sentence_on_why_and_inflight_too() -> None:
+    """It always did on `search` and `thread`. The flag was not accepted on these two at
+    all, so the one thing `--compact` does on every enveloped page did not happen here."""
+    page = {"repo": "owner/name", "number": 1, "claims": [], "links_indexed": 12}
+
+    assert "not instructions" in render_inflight(page)
+    assert "not instructions" not in render_inflight(page, compact=True)
+    assert "not instructions" in render_why(_why())
+    assert "not instructions" not in render_why(_why(), compact=True)

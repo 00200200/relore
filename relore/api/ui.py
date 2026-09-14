@@ -297,6 +297,13 @@ relore status</pre>
          absence proves nothing. A client may ask for less; never for more. No count and
          no caveat is ever trimmed, and <code>--json</code> carries every path either
          way.</p>
+      <p>The four globals — <code>--json</code>, <code>--compact</code>,
+         <code>--plain</code>, <code>--api</code> — are accepted on <b>every verb</b> and
+         on either side of it. What <code>--compact</code> shortens is whatever the verb
+         has to shorten: a snippet, a review comment, a matched line, a truncated file
+         list. Where a verb prints one short row per result it changes nothing, and
+         <code>relore symbol</code> keeps its body whole either way — the body is the
+         answer.</p>
 
       <h3>The code lens</h3>
       <p>The same questions, asked of the tree instead of the conversation. Four read this

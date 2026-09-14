@@ -69,13 +69,64 @@ def test_a_global_flag_is_accepted_on_either_side_of_the_verb(argv: list[str]) -
     assert cli.build_parser().parse_args(argv).json is True
 
 
-def test_the_subparser_alias_does_not_overwrite_a_flag_given_before_the_verb() -> None:
+#: One minimal invocation per verb, so the matrix below can be asserted rather than
+#: sampled. A verb added without a row here fails `test_every_verb_is_exercised_below`.
+MINIMAL = {
+    "search": ["search", "rope"],
+    "thread": ["thread", "1"],
+    "inflight": ["inflight", "1"],
+    "precedent": ["precedent"],
+    "why": ["why", "a.py:1"],
+    "status": ["status"],
+    "map": ["map"],
+    "defs": ["defs", "a.py"],
+    "refs": ["refs", "helper"],
+    "symbol": ["symbol", "a.f"],
+    "grep": ["grep", "rope"],
+    "copies": ["copies", "f"],
+}
+
+
+def _verbs() -> list[str]:
+    subparsers = next(a for a in cli.build_parser()._actions if hasattr(a, "choices") and a.choices)
+    return list(subparsers.choices)
+
+
+def test_every_verb_is_exercised_below() -> None:
+    assert set(_verbs()) == set(MINIMAL), "a verb was added without a row in MINIMAL"
+
+
+@pytest.mark.parametrize("verb", sorted(MINIMAL))
+@pytest.mark.parametrize("flag", [flag for flag, _ in cli.GLOBAL_FLAGS])
+def test_every_global_flag_is_accepted_after_every_verb(verb: str, flag: str) -> None:
+    """The matrix, asserted rather than sampled (huggingface/relore#55).
+
+    The globals landed one `add_parser` at a time and ended up per-verb: `--json` on all
+    twelve, `--compact` on the three that existed when #6 was closed -- one of them a stub
+    -- and `--plain` on none. A flag that works after `thread` and fails after `grep` has
+    no rule a caller can learn, and argparse calls it *unrecognized* rather than misplaced,
+    so the repair an agent reaches for is to delete it. On `grep --compact` that is the
+    opposite of what it wanted.
+    """
+    argv = [*MINIMAL[verb], flag, *(["http://127.0.0.1:9"] if flag == "--api" else [])]
+
+    args = cli.build_parser().parse_args(argv)
+
+    assert getattr(args, flag.lstrip("-")) not in (False, None)
+
+
+@pytest.mark.parametrize("flag", [flag for flag, _ in cli.GLOBAL_FLAGS])
+def test_the_subparser_alias_does_not_overwrite_a_flag_given_before_the_verb(flag: str) -> None:
     """The trap in accepting it twice: a subparser default would silently turn
     `relore --json search` back off."""
-    args = cli.build_parser().parse_args(["--compact", "search", "anything"])
+    before = [flag, *(["http://127.0.0.1:9"] if flag == "--api" else []), "search", "anything"]
 
-    assert args.compact is True
-    assert args.json is False
+    args = cli.build_parser().parse_args(before)
+
+    assert getattr(args, flag.lstrip("-")) not in (False, None)
+    # And nothing else was turned on by being adjacent to it.
+    on = [f for f, _ in cli.GLOBAL_FLAGS if getattr(args, f.lstrip("-")) not in (False, None)]
+    assert on == [flag]
 
 
 @pytest.mark.parametrize("verb", ["precedent"])
@@ -206,10 +257,67 @@ def test_grep_says_one_hit_rather_than_1_hits() -> None:
 
 def test_grep_still_discloses_its_cap_with_the_remedy_in_it() -> None:
     """The one thing this command already got right, and worth keeping while rewording
-    around it: the cap says so, inline, with what to do about it."""
-    text = cli._grep_text({"hits": [], "files_searched": 3, "truncated": True})
+    around it: the cap says so, inline, with what to do about it.
 
-    assert "(capped: narrow it with --path)" in text
+    The remedy moved behind `presentation` when `--plain` became accepted on this verb
+    (huggingface/relore#55) -- the cap is a fact and is printed either way, `--path` is
+    advice. A caveat is never dropped for brevity; a suggestion is not a caveat.
+    """
+    payload = {"hits": [], "files_searched": 3, "truncated": True}
+
+    assert "(capped: narrow it with --path)" in cli._grep_text(payload, presentation=True)
+    assert "(capped)" in cli._grep_text(payload)
+
+
+def test_grep_shortens_its_matched_lines_under_compact_and_counts_them() -> None:
+    """`--compact` was rejected by `grep` and accepted by `thread`, so an agent that had
+    seen the second write the first and was told the flag was *unrecognized*
+    (huggingface/relore#55). It is accepted now, and the matched line -- 300 characters of
+    a minified bundle, at worst -- is what there is to trim here."""
+    payload = {"hits": [{"path": "a.py", "line": 1, "text": "x" * 400}], "files_searched": 1}
+
+    text = cli._grep_text(payload, compact=True)
+
+    assert "…" in text
+    assert f"1 line shortened to {cli.COMPACT_CHARS} characters by --compact" in text
+    assert len(text) < len(cli._grep_text(payload))
+    # The row and both denominators survive: the flag shortens prose, it never drops a hit.
+    assert "a.py:1" in text and "-- 1 hit in 1 of 1 file searched" in text
+
+
+def test_a_short_grep_line_is_not_marked_as_shortened() -> None:
+    payload = {"hits": [{"path": "a.py", "line": 1, "text": "rope"}], "files_searched": 1}
+
+    assert "shortened" not in cli._grep_text(payload, compact=True)
+
+
+def test_symbol_keeps_its_body_whole_under_compact() -> None:
+    """The body is the answer this verb exists to give. A shortened one is a wrong answer,
+    not a cheaper one, so `--compact` is accepted here and deliberately does nothing."""
+    payload = {
+        "path": "a.py",
+        "start_line": 1,
+        "kind": "function",
+        "qualname": "f",
+        "body": "def f():\n    " + "return 1  # " + "x" * 400,
+    }
+
+    assert payload["body"] in cli._symbol_text(payload)
+
+
+def test_symbol_names_the_count_in_both_forms_and_the_remedy_in_one() -> None:
+    payload = {
+        "path": "a.py",
+        "start_line": 1,
+        "kind": "function",
+        "qualname": "f",
+        "body": "...",
+        "definitions_total": 7,
+    }
+
+    assert "7 definitions of this name" in cli._symbol_text(payload)
+    assert "`relore copies` groups them" not in cli._symbol_text(payload)
+    assert "`relore copies` groups them" in cli._symbol_text(payload, presentation=True)
 
 
 def test_copies_calls_out_the_shape_of_one() -> None:
@@ -238,5 +346,11 @@ def test_copies_says_what_it_normalized_away() -> None:
         {"symbol": "f", "total": 1, "exact": True, "groups": [{"count": 1, "copies": []}]}
     )
 
-    assert "normalized away" in grouped and "--exact" in grouped
+    assert "normalized away" in grouped
     assert "exact text" in exact and "normalized away" not in exact
+    # What was normalized away is a caveat and is in both forms; the flag that turns it
+    # off is advice, so it is in the terminal form only (#13, huggingface/relore#55).
+    assert "--exact" not in grouped
+    assert "--exact" in cli._copies_text(
+        {"symbol": "f", "total": 1, "groups": [{"count": 1, "copies": []}]}, presentation=True
+    )
