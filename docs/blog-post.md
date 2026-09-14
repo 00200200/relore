@@ -133,6 +133,24 @@ that can explain why the change was made.
 
 It connects the code that exists today back to the discussion that shaped it.
 
+## What that changes
+
+The run this post opened with made 153 tool calls, re-read files 137 times and
+produced no fix. It also had no way to ask about any of the history above: the
+agent's entire toolset was `grep`, `read_file`, `list_dir` and `fetch_url`, so
+every question in that list was unreachable from inside the task.
+
+The field-report run reached the root cause, the culprit PR and the already-open
+fix in about ten calls. A [later run](https://github.com/huggingface/relore/issues/58)
+on a bug it had never seen found the in-flight PR on its third call and came back
+with two findings that neither the issue nor that PR contained, without cloning
+the repository at all.
+
+Those are different bugs and different sessions, so it is a change of shape
+rather than a controlled benchmark. But the shape is the point: the questions
+that used to cost a hundred file reads, or that the agent simply could not ask,
+now cost a handful of calls each.
+
 ## Conclusion
 
 We built `relore` because Serge needed a better way to remember Transformers. But
