@@ -10,21 +10,22 @@ understand the problem.
 The agent wasn't doing anything obviously wrong. Transformers is just a very
 large codebase.
 
-
 ## browsing the code
 
-grep and rg are really good tools, and they are used a lot by coding 
-agent to find relevant snippets in code bases. The only caveat is that 
-they produce text and the LLM has to parse it to understand it.
+`grep` and `rg` are really good tools, and they are used a lot by coding 
+agent to find relevant snippets in code bases. The caveat is that 
+they produce text that are matching lines without structure or prioritization, 
+the LLM has to parse it to understand it.
 
 You can always reduce the problem by actively pruning / compressing these interactions 
 in the context, but it's still a text base system with extra work for you LLM.
 
-Tools like ctags and tree-sitter solve this by providing a searchable symbols 
+Tools like `ctags` and `tree-sitter` solve this by providing a searchable symbols 
 index, and you can find numerous projects out there that will do exactly 
 that and surface it in a CLI for your agent.
 
-So we started building a symbol index of our own and exposing it through a new tool: relore.
+So we first added structural code navigation of our own and exposing it through 
+a new tool: `relore`.
 
 In one of our field tests, the agent found that relore defs gave it a better
 overview of a file than reading the whole thing, using roughly 5% of the
@@ -69,7 +70,8 @@ The interesting part for us is that we don't need projects to start writing
 their history differently. Most of that knowledge already exists: it is just
 trapped in years of GitHub discussions.
 
-Github search is what you can use to look for this, but has severe limitations.
+GitHub Search is often the right tool for one-off human lookups—fresh, authoritative, 
+cross-repo—and falls down specifically as a high-throughput agent retrieval layer:
 
 - it exposes a best-match ranking, but it is opaque and isn't designed around
 the kinds of evidence our agents care about.
@@ -79,10 +81,9 @@ The agent then has to fetch and reread that thread to discover which comment
 matched, who wrote it, and when.
 
 
-## meet relore, an hybrid index
+## meet relore : repository memory
 
-
-relore (REpository LORE) is a searchable memory for a GitHub repository.
+`relore` (REpository LORE) is a searchable memory for a GitHub repository.
 
 It indexes issues, PRs, comments, reviews, commit messages and the
 relationships between them. Alongside that history it keeps a working clone of
@@ -102,7 +103,7 @@ an agent using relore to investigate a Transformer bug.
 A fix was already open, eight hours old, and wasn't linked from the issue. The
 agent was about to write another patch.
 
-On that bug, a cold agent using only relore --help did the following:
+On that bug, a cold agent using only `relore --help` did the following:
 
 - read the issue and immediately extracted the authoritative maintainer comment;
 - learned that the bug was part of a broader regression;
@@ -118,7 +119,6 @@ keep the PostgreSQL index fresh, not by every agent doing a search.
 One of the queries we're experimenting with is making this connection even more direct:
 
 ```
-
 relore why src/.../modeling_gpt_neox_japanese.py:90
 ```
 
@@ -130,16 +130,18 @@ it.
 
 ## conclusion
 
-We built relore because Serge needed a better way to remember Transformers. But
+We built `relore` because Serge needed a better way to remember Transformers. But
 there isn't anything Transformers-specific about the problem.
 
 Mature open-source projects accumulate years of decisions in issues, reviews
 and PR comments. Humans learn that lore slowly. Agents start every session
 knowing none of it.
 
-relore turns that history into something both can query, and connects it back
+`relore` turns that history into something both can query, and connects it back
 to the code that exists today.
 
 It's open source, Apache 2.0, and works on any GitHub repository you're willing
 to index.
+
+the repo is here, contributions welcome https://github.com/huggingface/relore
 
