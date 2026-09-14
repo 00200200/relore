@@ -91,6 +91,11 @@ the repository, so an agent can move between “what did people say?” and “w
 does the code look like now?” without loading either world wholesale into its
 context.
 
+![Relore sits between a repository's history and its current code, and answers an agent's questions against both.](relore-diag.png)
+
+*History on one side, the code as it is today on the other, and one tool that
+can answer across both.*
+
 Not every piece of project history is equally authoritative.
 A maintainer explaining why an approach was rejected is different from a contributor
 speculating about a bug, or a bot posting generated text. relore keeps that
