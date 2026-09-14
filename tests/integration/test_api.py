@@ -78,6 +78,21 @@ def test_a_file_filtered_page_says_how_many_threads_it_could_not_test(
     assert "no collected changed-file list" in render_search(payload)
 
 
+def test_the_untested_count_ignores_issues(
+    engine: Engine, fake: FakeGitHub, client: TestClient
+) -> None:
+    """An issue has no diff and never will, so its absence from a `--file` page is the
+    right answer rather than a gap. Counting issues buries the real number: on the live
+    transformers index it was 19,460 issues against 4 open PRs actually missing a list."""
+    fake.add_issue(1, body="a crash in the decoder")
+    fake.add_pr(2, body="another crash in the decoder")
+    _index(engine, fake, 1, 2)
+
+    payload = _search(client, query="crash", files=["src/decoder.py"])
+
+    assert payload["files_untested"] == 1, "the PR only; the issue is not a gap"
+
+
 def test_the_untested_count_is_zero_without_a_file_filter(
     engine: Engine, fake: FakeGitHub, client: TestClient
 ) -> None:

@@ -475,10 +475,13 @@ $ relore search "tensor size mismatch" --file modeling_gpt_neox_japanese.py
 3 more threads matched but have no collected changed-file list, so --file could not test them.
 ```
 
-Those three are not non-matches. A thread only has a changed-file list once the per-PR
-pass has reached it, and until then it is absent from the page without having been tested
-— so an empty or short `--file` result is a statement about the index as much as about the
-corpus. `files_untested` carries the same number in `--json`.
+Those three are not non-matches. A pull request only has a changed-file list once the
+per-PR pass has reached it, and until then it is absent from the page without having been
+tested — so an empty or short `--file` result is a statement about the index as much as
+about the corpus. `files_untested` carries the same number in `--json`.
+
+It counts **pull requests only**: an issue has no diff and never will, so its absence from
+a `--file` page is the right answer rather than a gap.
 
 Three things make one match nothing on an index that does hold the answer. `--file` takes
 the path **as the repository spells it** — but any trailing part of it will do, matched at a
@@ -515,7 +518,7 @@ tells you which — that distinction is deliberate (§12).
 
 ```
 $ relore status
-version   0.3.7
+version   0.3.8
 backend   postgresql / ts_rank_cd  capabilities: fulltext, weighted
 schema    applied [1, 2, 3, 4, 5, 6, 7], pending []
 index     55168 threads, 517276 documents, 332 raw objects

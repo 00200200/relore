@@ -138,9 +138,14 @@ class SearchBackend(ABC):
         that never touched the path: both are simply absent. ``thread`` discloses that per
         row; this is the same disclosure for the aggregate.
 
+        **Pull requests only.** An issue has no diff and never will, so its absence from a
+        ``--file`` page is the right answer rather than a gap -- and counting issues buries
+        the real number in them: on ``transformers`` it is 19,460 issues against 4 open PRs
+        actually missing a list.
+
         Every filter *except* ``--file`` is applied, the text match included, so the number
-        means "threads this query otherwise matched, which have no collected changed-file
-        list" rather than a corpus-wide total that would be identical on every page.
+        means "pull requests this query otherwise matched, which have no collected
+        changed-file list" rather than a corpus-wide total identical on every page.
         """
         if not query.files or not query.repos:
             return 0
@@ -153,7 +158,11 @@ class SearchBackend(ABC):
         stmt = (
             select(func.count(distinct(s.documents.c.thread_id)))
             .select_from(s.documents.join(s.threads, s.documents.c.thread_id == s.threads.c.id))
-            .where(*self._filters(query, include_files=False), uncollected)
+            .where(
+                *self._filters(query, include_files=False),
+                s.threads.c.thread_type == "pr",
+                uncollected,
+            )
         )
         if query.text.strip():
             stmt = self.fts_filter(stmt, query.text)
