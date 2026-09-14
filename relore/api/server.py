@@ -230,6 +230,11 @@ def build_app(
                 "legs": [{"leg": leg.name, "term": leg.term} for leg in legs],
             },
             "count": len(hits),
+            # Threads this query otherwise matched that have no collected changed-file
+            # list, so `--file` could not test them either way. Absent from the page and
+            # not a non-match: saying so is the difference between "nothing else touched
+            # this path" and "nothing else we have a file list for".
+            "files_untested": deps.backend.files_blind_spot(query),
             "hits": [hit_json(hit, compact=body.compact) for hit in hits],
         }
         return _json(

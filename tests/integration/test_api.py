@@ -22,6 +22,7 @@ from relore.api import ui
 from relore.api.server import build_app, serve
 from relore.api.tokens import LABEL_SCOPE, Authenticator, Token
 from relore.ingest.index_thread import index_thread
+from relore.render import render_search
 from relore.search.queries import MAX_HITS, MAX_SNIPPET_CHARS
 from relore.security.untrusted import BEGIN, END, NOTICE
 from relore.wire import CLIENT_HEADER, SERVER_HEADER, UPGRADE_REQUIRED
@@ -55,6 +56,36 @@ def _search(client: TestClient, **body) -> dict:
     response = client.post("/api/v1/search", json=body)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def test_a_file_filtered_page_says_how_many_threads_it_could_not_test(
+    engine: Engine, fake: FakeGitHub, client: TestClient
+) -> None:
+    """A thread with no collected changed-file list is absent from a `--file` page without
+    ever having been tested against the path, which reads as a negative fact. `thread`
+    discloses that per row; the aggregate has to as well (huggingface/relore#48).
+
+    Both PRs mention the term. Neither has a changed-file list here -- nothing has run the
+    per-PR pass -- so the page is empty *and* has to say the filter could not decide."""
+    fake.add_pr(1, body="a crash in the decoder")
+    fake.add_pr(2, body="another crash in the decoder")
+    _index(engine, fake, 1, 2)
+
+    payload = _search(client, query="crash", files=["src/decoder.py"])
+
+    assert payload["count"] == 0
+    assert payload["files_untested"] == 2
+    assert "no collected changed-file list" in render_search(payload)
+
+
+def test_the_untested_count_is_zero_without_a_file_filter(
+    engine: Engine, fake: FakeGitHub, client: TestClient
+) -> None:
+    """It is a caveat about `--file`, so it must not appear on a page that did not use it."""
+    fake.add_pr(1, body="a crash in the decoder")
+    _index(engine, fake, 1)
+
+    assert _search(client, query="crash")["files_untested"] == 0
 
 
 # -- the envelope ----------------------------------------------------------

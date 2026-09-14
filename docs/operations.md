@@ -46,6 +46,13 @@ the poller stages no detail, so without it a PR first seen by polling carries no
 stats, no `merged_by` and no reviews. `--refresh-details` re-stages everything, for when
 the extraction changed rather than the corpus.
 
+**It also walks open PRs, and walks them again every run.** A merged PR's diff is final, so
+it is fetched once and skipped forever; an open one is still moving, so it is re-fetched.
+That costs what is currently in flight — a small, self-limiting set — and it is what lets
+`search --file` answer "is somebody already touching this path", which is most of what that
+flag is asked. Closed-unmerged PRs are in neither set: they did not ship and are not in
+flight. `--merged-only` restores the older behaviour for a run that wants precedent alone.
+
 `fetch` and `derive` are separate on purpose: raw payloads are staged, so improving an
 extractor and re-deriving costs minutes of local CPU instead of another day of API budget.
 `poll` does both for the threads that moved, so the split is invisible in steady state.

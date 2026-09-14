@@ -149,10 +149,8 @@ def staged_thread_numbers(conn: Connection, repo: str, *, after: int | None = No
 
 
 def merged_pr_numbers(conn: Connection, repo: str, *, after: int | None = None) -> list[int]:
-    """Merged PRs, ascending. The per-PR pass is restricted to these (section 3).
-
-    An unmerged PR's file list is not evidence of anything that shipped, and this is the
-    expensive pass -- so the restriction is both correctness and budget.
+    """Merged PRs, ascending. What counts as precedent (section 3): an unmerged PR's file
+    list is not evidence of anything that shipped.
 
     Read off ``threads.merged_at`` rather than out of a raw payload: section 4.1 forbids
     querying *into* JSON, since a JSON path predicate is not portable.
@@ -164,6 +162,28 @@ def merged_pr_numbers(conn: Connection, repo: str, *, after: int | None = None) 
     )
     if after is not None:
         stmt = stmt.where(s.threads.c.github_number > after)
+    return sorted(int(n) for (n,) in conn.execute(stmt))
+
+
+def open_pr_numbers(conn: Connection, repo: str) -> list[int]:
+    """Still-open PRs, ascending.
+
+    Separate from :func:`merged_pr_numbers` because the two answer different questions and
+    are staged under different rules. A merged PR's diff is final, so it is fetched once
+    and skipped forever after. An open one is still moving, so it is re-fetched every run
+    -- which is affordable precisely because "open" is a small, self-limiting set.
+
+    Closed-unmerged PRs are in neither: they did not ship and are not in flight.
+    """
+    stmt = select(s.threads.c.github_number).where(
+        s.threads.c.repo == repo,
+        s.threads.c.thread_type == "pr",
+        s.threads.c.state == "open",
+        # Both conditions, not just the state: a merged PR is not in flight whatever its
+        # state column says, and re-walking it every run would be the expensive half of
+        # the corpus paying the open half's refresh cost.
+        s.threads.c.merged_at.is_(None),
+    )
     return sorted(int(n) for (n,) in conn.execute(stmt))
 
 

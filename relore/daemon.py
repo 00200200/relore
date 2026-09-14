@@ -63,6 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="re-fetch per-PR detail already staged, instead of only PRs that lack it",
     )
+    q.add_argument(
+        "--merged-only",
+        action="store_true",
+        help="per-PR detail for merged PRs only; open ones keep no changed-file list, "
+        "so `search --file` cannot see the work currently in flight",
+    )
 
     q = sub.add_parser(
         "sample",
@@ -265,6 +271,7 @@ def _backfill(args: argparse.Namespace) -> int:
         graphql=not args.no_graphql,
         authority=not args.no_authority,
         refresh_details=args.refresh_details,
+        include_open=not args.merged_only,
     )
 
 
@@ -275,6 +282,7 @@ def _run_backfill(
     graphql: bool,
     authority: bool,
     refresh_details: bool = False,
+    include_open: bool = True,
 ) -> int:
     from relore.ingest.backfill import backfill
 
@@ -292,6 +300,7 @@ def _run_backfill(
                 gql=gql,
                 authority=authority,
                 refresh_details=refresh_details,
+                include_open=include_open,
             )
         finally:
             if gql is not None:

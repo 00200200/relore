@@ -31,6 +31,7 @@ from sqlalchemy import (
     Select,
     and_,
     case,
+    distinct,
     exists,
     func,
     literal,
@@ -129,6 +130,35 @@ class SearchBackend(ABC):
         spec = rank_as or RankSpec.of(query)
         with self.engine.connect() as conn:
             return [self._hit(row, query) for row in conn.execute(self._select(query, spec))]
+
+    def files_blind_spot(self, query: SearchQuery) -> int:
+        """How many threads ``--file`` could not *test*, rather than did not match.
+
+        A thread with no changed-file row is indistinguishable, in the filter, from one
+        that never touched the path: both are simply absent. ``thread`` discloses that per
+        row; this is the same disclosure for the aggregate.
+
+        Every filter *except* ``--file`` is applied, the text match included, so the number
+        means "threads this query otherwise matched, which have no collected changed-file
+        list" rather than a corpus-wide total that would be identical on every page.
+        """
+        if not query.files or not query.repos:
+            return 0
+        uncollected = ~exists().where(
+            and_(
+                s.thread_files.c.thread_id == s.documents.c.thread_id,
+                s.thread_files.c.source == CHANGED,
+            )
+        )
+        stmt = (
+            select(func.count(distinct(s.documents.c.thread_id)))
+            .select_from(s.documents.join(s.threads, s.documents.c.thread_id == s.threads.c.id))
+            .where(*self._filters(query, include_files=False), uncollected)
+        )
+        if query.text.strip():
+            stmt = self.fts_filter(stmt, query.text)
+        with self.engine.connect() as conn:
+            return int(conn.execute(stmt).scalar() or 0)
 
     def _select(self, query: SearchQuery, spec: RankSpec | None = None) -> Select:
         """Section 6's dedup and per-thread cap, in SQL rather than after the fetch.
@@ -343,7 +373,7 @@ class SearchBackend(ABC):
             )
         return condition
 
-    def _filters(self, query: SearchQuery) -> list[Any]:
+    def _filters(self, query: SearchQuery, *, include_files: bool = True) -> list[Any]:
         """Every predicate that is not full text.
 
         Repo scoping is first and unconditional: section 11 applies it here, in the query
@@ -361,8 +391,8 @@ class SearchBackend(ABC):
         # fills. They are wired now because they are versioned API surface (section 7) and
         # because a filter written later against a populated table is a filter nobody
         # tested empty -- but until that pass runs they correctly match nothing.
-        if query.files:
-            where.append(self._thread_has(s.thread_files, s.thread_files.c.path, query.files))
+        if query.files and include_files:
+            where.append(self._thread_has_path(query.files))
         if query.symbols:
             where.append(
                 self._thread_has(s.thread_symbols, s.thread_symbols.c.symbol, query.symbols)
@@ -376,6 +406,32 @@ class SearchBackend(ABC):
         if query.tests:
             where.append(self._thread_has(s.thread_tests, s.thread_tests.c.test_id, query.tests))
         return where
+
+    @staticmethod
+    def _thread_has_path(values: tuple[str, ...]) -> Any:
+        """``--file``, matched exactly *or* on a path-segment boundary.
+
+        ``thread_files`` holds diff entries under their repository-root path and prose
+        mentions under whatever somebody typed, so exact matching made one flag mean three
+        different things. Suffix matching collapses them: a bare basename and a partial
+        path both find the changed-file rows the full path finds.
+
+        Anchored at ``/`` so ``modeling_x.py`` cannot match ``not_modeling_x.py``, and
+        ``ESCAPE``'d because a path may contain ``_``, which is a LIKE wildcard.
+        """
+        clauses: list[Any] = []
+        for value in values:
+            needle = value.strip().lstrip("./")
+            if not needle:
+                continue
+            clauses.append(s.thread_files.c.path == needle)
+            pattern = "%/" + needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            clauses.append(s.thread_files.c.path.like(pattern, escape="\\"))
+        if not clauses:
+            return literal(False)
+        return exists().where(
+            and_(s.thread_files.c.thread_id == s.documents.c.thread_id, or_(*clauses))
+        )
 
     @staticmethod
     def _thread_has(

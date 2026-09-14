@@ -56,6 +56,16 @@ def render_search(
         header.append(f"trust floor: {', '.join(floor)}")
     if not hits:
         header.append("nothing matched.")
+    untested = int(payload.get("files_untested") or 0)
+    if untested:
+        # A `--file` page is read as "these are the threads that touched it". Threads with
+        # no collected changed-file list are absent from it without ever being tested, and
+        # they skew new -- so the page has to say so or it overstates what it knows.
+        header.append(
+            f"{untested} more thread{'' if untested == 1 else 's'} matched but "
+            f"{'has' if untested == 1 else 'have'} no collected changed-file list, "
+            f"so --file could not test {'it' if untested == 1 else 'them'}."
+        )
 
     body = [*header, ""]
     for index, hit in enumerate(hits, start=1):

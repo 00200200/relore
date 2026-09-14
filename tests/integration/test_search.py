@@ -131,6 +131,39 @@ def test_the_file_filter_matches_a_path_named_in_prose(engine: Engine, fake: Fak
     assert _search(engine, files=("src/absent.py",)) == []
 
 
+def test_the_file_filter_matches_a_basename_and_a_partial_path(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """One flag had three semantics: the full path hit the diff, a bare basename hit only
+    prose mentions, and a partial path -- the natural thing to paste from a traceback --
+    matched nothing and returned a clean empty page (huggingface/relore#48)."""
+    pr = fake.add_pr(1, body="a fix", merged_at="2026-02-02T00:00:00Z")
+    pr.files = ["src/transformers/models/gpt/modeling_gpt.py"]
+    fake.add_pr(2, body="unrelated", merged_at="2026-02-02T00:00:00Z")
+    _backfill(engine, fake)
+
+    for form in (
+        "src/transformers/models/gpt/modeling_gpt.py",
+        "models/gpt/modeling_gpt.py",
+        "modeling_gpt.py",
+    ):
+        assert {h.number for h in _search(engine, files=(form,))} == {1}, form
+
+
+def test_the_file_filter_anchors_a_suffix_at_a_path_separator(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """Suffix matching must not become substring matching: `modeling_gpt.py` is a
+    different file from `not_modeling_gpt.py`, and `_` is a LIKE wildcard."""
+    pr = fake.add_pr(1, body="a fix", merged_at="2026-02-02T00:00:00Z")
+    pr.files = ["src/not_modeling_gpt.py"]
+    _backfill(engine, fake)
+
+    assert _search(engine, files=("modeling_gpt.py",)) == []
+    # `_` escaped, so it cannot stand in for the `X`.
+    assert _search(engine, files=("notXmodeling_gpt.py",)) == []
+
+
 def test_the_error_filter_matches_a_pasted_traceback(engine: Engine, fake: FakeGitHub) -> None:
     """The two sides have to normalize identically (section 5.3). The caller pastes what
     their terminal printed -- addresses, counts and all -- and the indexed form has none

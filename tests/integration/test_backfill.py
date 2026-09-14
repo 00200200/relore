@@ -165,14 +165,53 @@ def test_the_per_pr_pass_fills_in_merge_metadata(engine: Engine, fake: FakeGitHu
     assert row.metadata["changed_files"] == 1
 
 
-def test_the_per_pr_pass_visits_only_merged_prs(engine: Engine, fake: FakeGitHub) -> None:
-    """An unmerged PR's file list is not evidence of anything that shipped (section 3)."""
-    unmerged = fake.add_pr(3, updated_at="2026-03-01T00:00:00Z", merged_at=None)
-    fake.add_review(unmerged, 201, "not merged, not precedent")
+def test_the_per_pr_pass_skips_closed_unmerged_prs(engine: Engine, fake: FakeGitHub) -> None:
+    """A closed-unmerged PR neither shipped nor is in flight, so it is evidence of
+    nothing and costs GraphQL points to collect (section 3)."""
+    abandoned = fake.add_pr(3, updated_at="2026-03-01T00:00:00Z", merged_at=None, state="closed")
+    fake.add_review(abandoned, 201, "abandoned, not precedent")
 
     _run(engine, fake, graphql=True)
 
     assert ("review", "201") not in _docs(engine)
+    with engine.connect() as conn:
+        staged = (
+            conn.execute(
+                select(s.raw_objects.c.object_id).where(s.raw_objects.c.object_type == "pr_details")
+            )
+            .scalars()
+            .all()
+        )
+    assert staged == ["2"]
+
+
+def test_the_per_pr_pass_visits_open_prs(engine: Engine, fake: FakeGitHub) -> None:
+    """An open PR is the answer to "is somebody already touching this file", and with no
+    changed-file list it is invisible to `search --file` -- which is the question that
+    flag is mostly asked (huggingface/relore#48)."""
+    in_flight = fake.add_pr(3, updated_at="2026-03-01T00:00:00Z", merged_at=None)
+    fake.add_review(in_flight, 201, "still in review")
+
+    _run(engine, fake, graphql=True)
+
+    with engine.connect() as conn:
+        staged = set(
+            conn.execute(
+                select(s.raw_objects.c.object_id).where(s.raw_objects.c.object_type == "pr_details")
+            )
+            .scalars()
+            .all()
+        )
+    assert staged == {"2", "3"}
+    assert ("review", "201") in _docs(engine)
+
+
+def test_merged_only_opts_back_out_of_open_prs(engine: Engine, fake: FakeGitHub) -> None:
+    """`--merged-only` restores the pre-#48 rule, for a run that wants precedent alone."""
+    fake.add_pr(3, updated_at="2026-03-01T00:00:00Z", merged_at=None)
+
+    _run(engine, fake, graphql=True, include_open=False)
+
     with engine.connect() as conn:
         staged = (
             conn.execute(
@@ -219,6 +258,21 @@ def test_the_per_pr_pass_costs_only_the_prs_it_has_not_staged(
     # And the escape hatch, for when the extraction changed rather than the corpus.
     again = _run(engine, fake, graphql=True, refresh_details=True)
     assert next(p for p in again.passes if p.name == FILES_PASS).staged == 2
+
+
+def test_open_prs_are_re_walked_even_though_their_detail_is_staged(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """The skip rule is for *final* diffs. An open PR's changed-file list moves with every
+    push, so staging it once and skipping it forever would freeze it at the shape it had
+    the first time -- stale in the one place freshness is the whole point."""
+    fake.add_pr(3, updated_at="2026-03-01T00:00:00Z", merged_at=None)
+    _run(engine, fake, graphql=True)
+
+    result = _run(engine, fake, graphql=True)
+
+    files = next(p for p in result.passes if p.name == FILES_PASS)
+    assert files.staged == 1, "PR 2 is merged and stays skipped; open PR 3 is walked again"
 
 
 def test_review_bodies_are_not_duplicated_when_both_sources_have_them(

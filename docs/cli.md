@@ -467,9 +467,25 @@ $ relore search "429"                              → 3 hits
 $ relore search "429" --file reviewbot/llm.py      → 0 hits   # nothing said both
 ```
 
+A `--file` page also says what it could **not** decide:
+
+```
+$ relore search "tensor size mismatch" --file modeling_gpt_neox_japanese.py
+10 hits for 'tensor size mismatch'
+3 more threads matched but have no collected changed-file list, so --file could not test them.
+```
+
+Those three are not non-matches. A thread only has a changed-file list once the per-PR
+pass has reached it, and until then it is absent from the page without having been tested
+— so an empty or short `--file` result is a statement about the index as much as about the
+corpus. `files_untested` carries the same number in `--json`.
+
 Three things make one match nothing on an index that does hold the answer. `--file` takes
-the path **as the repository spells it**, not an absolute one from a traceback — nothing
-maps one to the other for you. `--test` takes a runner id
+the path **as the repository spells it** — but any trailing part of it will do, matched at a
+`/` boundary, so `modeling_gpt.py` and `models/gpt/modeling_gpt.py` both find
+`src/transformers/models/gpt/modeling_gpt.py`. An absolute path from your own checkout
+still will not: strip the leading directories the repository does not have. `--test` takes
+a runner id
 (`tests/test_x.py::test_y`, with or without its `[params]`), not a bare function name; a
 bare name is a `--symbol`. And `--error` may be given a whole pasted traceback, which is
 normalized into the form the index stores — but a *paraphrase* of an error is text, so pass
@@ -499,7 +515,7 @@ tells you which — that distinction is deliberate (§12).
 
 ```
 $ relore status
-version   0.3.6
+version   0.3.7
 backend   postgresql / ts_rank_cd  capabilities: fulltext, weighted
 schema    applied [1, 2, 3, 4, 5, 6, 7], pending []
 index     55168 threads, 517276 documents, 332 raw objects

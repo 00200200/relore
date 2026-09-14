@@ -91,6 +91,7 @@ def backfill(
     gql: GraphQLClient | None = None,
     authority: bool = True,
     refresh_details: bool = False,
+    include_open: bool = True,
 ) -> BackfillResult:
     result = BackfillResult(repo=repo)
     for name, walker in BULK_PASSES:
@@ -105,7 +106,7 @@ def backfill(
     # Last, because it needs `threads.merged_at` -- which exists only once the thread walk
     # has been derived.
     if gql is not None and (not only or FILES_PASS in only):
-        files = _files_pass(engine, gql, repo, refresh=refresh_details)
+        files = _files_pass(engine, gql, repo, refresh=refresh_details, include_open=include_open)
         result.passes.append(files)
         result.documents_written += files.documents_written
     elif gql is None:
@@ -122,7 +123,12 @@ def backfill(
 
 
 def _files_pass(
-    engine: Engine, gql: GraphQLClient, repo: str, *, refresh: bool = False
+    engine: Engine,
+    gql: GraphQLClient,
+    repo: str,
+    *,
+    refresh: bool = False,
+    include_open: bool = True,
 ) -> PassResult:
     """Reviews, changed files and commits for merged PRs, batched over GraphQL.
 
@@ -145,11 +151,20 @@ def _files_pass(
     """
     with engine.connect() as conn:
         resume = repo_layer.get_cursor(conn, repo, FILES_PASS)
-        numbers = repo_layer.merged_pr_numbers(conn, repo, after=int(resume) if resume else None)
+        after = int(resume) if resume else None
+        numbers = repo_layer.merged_pr_numbers(conn, repo, after=after)
+        # Open PRs are walked too, and walked *again* on every run. A merged PR's diff is
+        # final; an open one is the answer to "is somebody already touching this file",
+        # and it changes with every push. Leaving them out is what made `--file` blind to
+        # exactly the threads it gets asked about.
+        still_open = set(repo_layer.open_pr_numbers(conn, repo)) if include_open else set()
+        if after is not None:
+            still_open = {number for number in still_open if number > after}
         authority = repo_layer.get_authority(conn, repo)
         if not refresh:
             staged = repo_layer.staged_object_ids(conn, repo, "pr_details")
             numbers = [number for number in numbers if str(number) not in staged]
+        numbers = sorted(set(numbers) | still_open)
     if resume:
         log.info("%s: resuming the %s pass after PR %s", repo, FILES_PASS, resume)
     log.info("%s: %s pass over %d merged PRs", repo, FILES_PASS, len(numbers))
