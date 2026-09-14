@@ -91,7 +91,7 @@ the repository, so an agent can move between “what did people say?” and “w
 does the code look like now?” without loading either world wholesale into its
 context.
 
-Not every piece of project history should carry the same equally authoritative weight. 
+Not every piece of project history is equally authoritative.
 A maintainer explaining why an approach was rejected is different from a contributor
 speculating about a bug, or a bot posting generated text. relore keeps that
 provenance and exposes trust as part of search, so agents can restrict a query
@@ -126,7 +126,7 @@ relore why src/.../modeling_gpt_neox_japanese.py:90
 pull request and surfaces the review comments around that line, the discussion 
 that can explain why the change was made.
 
-It connects the code that exists today with the decision that produced it.
+It connects the code that exists today back to the discussion that shaped it.
 
 ## conclusion
 
