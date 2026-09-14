@@ -12,13 +12,12 @@ large codebase.
 
 ## browsing the code
 
-`grep` and `rg` are really good tools, and they are used a lot by coding 
-agent to find relevant snippets in code bases. The caveat is that 
-they produce text that are matching lines without structure or prioritization, 
-the LLM has to parse it to understand it.
+`grep` and `rg` are great tools, and coding agents use them constantly to find relevant snippets 
+in large codebases. But they return matching lines without much structure or prioritization. 
+The LLM still has to reconstruct the surrounding program structure from those results.
 
-You can always reduce the problem by actively pruning / compressing these interactions 
-in the context, but it's still a text base system with extra work for you LLM.
+You can reduce the cost by pruning or compressing those interactions, 
+but it is still a text-based workflow that leaves extra work to the model.
 
 Tools like `ctags` and `tree-sitter` solve this by providing a searchable symbols 
 index, and you can find numerous projects out there that will do exactly 
