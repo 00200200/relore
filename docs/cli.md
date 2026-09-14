@@ -36,7 +36,8 @@ first; this page is the long form.
 | `defs PATH` / `refs SYMBOL` | your local checkout by default; `--repo` asks the daemon's clone instead |
 | `precedent` | completed units of work — milestone 4, a stub today |
 
-Global: `--json` for machine-readable output, `--compact` to trim snippets, `--plain` for
+Global: `--json` for machine-readable output, `--compact` to trim snippets and shape a
+truncated changed-file list, `--plain` for
 the piped form on a terminal, `--api` to override `RELORE_API`. `--json` and `--compact` are
 accepted on **either side** of the verb. No results is exit 0 with an empty result, never
 nonzero — so an agent cannot mistake "nothing in the index" for "the tool is broken".
@@ -247,6 +248,7 @@ one:
 
 ```
 changed files: 100 of 323 collected. TRUNCATED: a path that is absent here may still have been touched
+  the collected page is the first 100 in path order, cut after src/transformers/models/gemma3/modular_gemma3.py — a path sorting after that one is absent whether or not the thread touched it
   src/transformers/modeling_rope_utils.py, …
   + 2 more the diff must contain, from the files inline review comments are anchored to (not part of the collected page)
 mentioned in the discussion: 5 — named by somebody, NOT the diff. A bare filename here is not evidence the thread changed it
@@ -254,7 +256,10 @@ mentioned in the discussion: 5 — named by somebody, NOT the diff. A bare filen
 ```
 
 - **changed** is the diff, collected 100 rows at a time by the per-PR pass. **Absence
-  proves nothing** while it says TRUNCATED.
+  proves nothing** while it says TRUNCATED — and the cut is a *prefix*, not a sample:
+  GitHub serves a diff in path order, so `100 of 323` means every path sorting after the
+  one named on the second line is missing whatever the thread touched. On `#39847` that
+  boundary fell at `gemma3`, which is why a reader looking for `gpt_neox` found nothing.
 - **anchored** is also the diff — GitHub will not anchor an inline review comment anywhere
   else — and is the one source that can name a path the 100-row cap dropped.
 - **mentioned** is prose: a bare basename, a traceback's path, a file somebody merely
@@ -263,6 +268,22 @@ mentioned in the discussion: 5 — named by somebody, NOT the diff. A bare filen
 
 Merged into one array — which is what it used to be — that last line answered a membership
 question with a wrong yes, and the same file appeared twice in two different spellings.
+
+Under `--compact` a **truncated** changed-file list is served as its shape instead of its
+paths, because that list is the one nothing may be concluded from and on `#39847` it was
+half the compact page (#56):
+
+```
+changed files: 100 of 323 collected. TRUNCATED: a path that is absent here may still have been touched
+  the collected page is the first 100 in path order, cut after src/transformers/models/gemma3/modular_gemma3.py — a path sorting after that one is absent whether or not the thread touched it
+  92 under src/transformers/ across 33 directories, 5 under examples/modular-transformers/, 3 under docs/source/
+  (paths omitted under --compact; `--json` serves them, and so does the default render)
+```
+
+*"A wide mechanical refactor across model directories"* is what the list was read for, and
+it is a sentence. The counts and the caveats are unchanged — `--compact` never trims those
+— and a **complete** list keeps its paths in every mode, since a complete list is the one
+that can answer a membership question.
 
 **`--repo` is required on a bare number when more than one repository is in scope.** The
 deployment indexes three, so a bare `relore thread 47720` there answers
@@ -518,7 +539,7 @@ tells you which — that distinction is deliberate (§12).
 
 ```
 $ relore status
-version   0.3.8
+version   0.3.9
 backend   postgresql / ts_rank_cd  capabilities: fulltext, weighted
 schema    applied [1, 2, 3, 4, 5, 6, 7], pending []
 index     55168 threads, 517276 documents, 332 raw objects
@@ -593,7 +614,10 @@ call, so "within a version" is something you can rely on rather than hope for:
   unmarked line is always `relore` speaking;
 - the whole page sits inside `<<<RELORE-UNTRUSTED>>>` … `<<<RELORE-UNTRUSTED-END>>>`;
 - counts and caveats are prose on their own line (`-- 10 of 89 comments … --`,
-  `changed files: …`, `(body truncated: …)`), and a caveat is never dropped for brevity;
+  `changed files: …`, `(body truncated: …)`), and a caveat is never dropped for brevity —
+  `--compact` replaces a truncated changed-file list with its shape and says it did, but
+  the count, the denominator and the TRUNCATED caveat above it are identical in both
+  forms;
 - no score is printed. The order is the ranking, and the number's scale is a property of
   the backend — it is in `--json` for whoever is tuning weights;
 - `state_reason`, `closed_by`, `merged`, `review_decision` and `requested_reviewers` (#22)

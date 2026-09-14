@@ -124,7 +124,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"relore {__version__}")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument(
-        "--compact", action="store_true", help="trim snippets for a tight context budget"
+        "--compact",
+        action="store_true",
+        help="trim snippets, and a truncated changed-file list to its shape, for a "
+        "tight context budget",
     )
     p.add_argument(
         "--plain",

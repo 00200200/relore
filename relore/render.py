@@ -132,7 +132,7 @@ def render_thread(
     lines += _event_lines(thread)
     if thread.get("labels"):
         lines.append(f"labels: {', '.join(thread['labels'])}")
-    lines += _file_lines(thread)
+    lines += _file_lines(thread, compact=compact, presentation=presentation)
     if thread.get("links"):
         lines.append("links: " + ", ".join(_link(link) for link in thread["links"]))
     lines += ["", quote(thread.get("body", ""))]
@@ -292,7 +292,9 @@ def _link(link: dict[str, Any]) -> str:
     return f"{link['relationship']} #{link['target']}{suffix}"
 
 
-def _file_lines(thread: dict[str, Any]) -> list[str]:
+def _file_lines(
+    thread: dict[str, Any], *, compact: bool = False, presentation: bool = False
+) -> list[str]:
     """The changed files and the mentioned ones, on separate lines, each with its meaning.
 
     A short list of *hits* is read as a weak positive; a *missing entry* is read as a
@@ -306,6 +308,15 @@ def _file_lines(thread: dict[str, Any]) -> list[str]:
     which that pull request does not touch, answered "did it change this?" with yes. A
     truncated list must not answer a membership question silently in *either* direction,
     so the two provenances are two lines and each says what it is.
+
+    **Which 100** is its own fact (huggingface/relore#56). The page is
+    ``files(first: 100)``, and GitHub serves a diff in path order -- checked against
+    ``#39847``, whose first page is exactly the 100 byte-order-first of its 323 paths, in
+    both the REST and the GraphQL form this pass uses. So the cut is a prefix, not a
+    sample: everything after ``lfm2_moe`` was missing from that thread's list, including
+    the one model directory the reader was there for. ``100 of 323`` alone reads as a
+    spread, and a reader who believes it is a spread reads the gap as thin coverage rather
+    than as a wall.
     """
     changed = thread.get("files_changed") or []
     anchored = thread.get("files_anchored") or []
@@ -322,13 +333,20 @@ def _file_lines(thread: dict[str, Any]) -> list[str]:
             lines.append("  " + ", ".join(changed))
     elif collected >= total:
         lines.append(f"changed files: {collected} of {total} — complete")
+        # Not shaped under `--compact`: a complete list is the one that *can* answer a
+        # membership question, and answering it is the whole of what the paths are for.
         lines.append("  " + ", ".join(changed))
     elif collected:
         lines.append(
             f"changed files: {collected} of {total} collected. TRUNCATED: a path that is "
             "absent here may still have been touched"
         )
-        lines.append("  " + ", ".join(changed))
+        lines.append(
+            f"  the collected page is the first {collected} in path order, cut after "
+            f"{max(changed)} — a path sorting after that one is absent whether or not the "
+            "thread touched it"
+        )
+        lines += _path_block(changed, compact=compact, presentation=presentation)
     else:
         lines.append(
             f"changed files: none collected of {total}, so this thread cannot answer "
@@ -357,6 +375,68 @@ def _file_lines(thread: dict[str, Any]) -> list[str]:
         )
         lines.append("  " + ", ".join(mentioned))
     return lines
+
+
+def _path_block(paths: list[str], *, compact: bool, presentation: bool) -> list[str]:
+    """The truncated changed-file list: the paths, or under ``--compact`` their shape.
+
+    ``--compact`` is a context budget, and this list was spending it on the one thing
+    huggingface/relore#11 forbids concluding from. On ``huggingface/transformers#39847``
+    it is 5,320 of the 10,651 bytes a compact ``thread`` renders -- half the page for 100
+    paths the line above them has just said prove nothing by their absence, and the 223
+    the reader may not even ask about are not there at all (huggingface/relore#56). What
+    that reader took from the list was *"a wide mechanical refactor across model
+    directories"*, and that is a sentence. The paths stay in the default render and in
+    ``--json``, which is where a caller that wants to grep them is already looking.
+
+    Only this branch is shaped. A *complete* list answers membership and keeps its paths;
+    the anchored and mentioned lists are short by construction and their value is the
+    names themselves -- a bare ``config.json`` somebody typed does not have a shape.
+    """
+    if not compact:
+        return ["  " + ", ".join(paths)]
+    return [
+        "  " + _path_shape(paths),
+        "  (paths omitted under --compact"
+        + ("; `--json` serves them, and so does the default render" if presentation else "")
+        + ")",
+    ]
+
+
+#: How many prefix groups :func:`_path_shape` counts out before it totals the rest. Three
+#: fits the shapes that occur -- source, tests, docs -- and the line stays one line, which
+#: is the point of it.
+SHAPE_GROUPS = 3
+
+
+def _path_shape(paths: list[str]) -> str:
+    """Where a list of paths sits and how far it spreads, in one line.
+
+    Grouped by the first two segments, which is the level a repository's layout is legible
+    at (``src/transformers/``, ``tests/models/``), and the directory count is the part
+    that separates one edited package from a sweep across thirty-three of them. It is the
+    two facts the full list was being read for, at ~2% of its bytes.
+    """
+    groups: dict[str, list[str]] = {}
+    for path in paths:
+        segments = path.split("/")
+        prefix = "/".join(segments[: min(2, len(segments) - 1)])
+        groups.setdefault(prefix + "/" if prefix else "", []).append(path)
+    ranked = sorted(groups.items(), key=lambda group: (-len(group[1]), group[0]))
+    parts = []
+    for prefix, members in ranked[:SHAPE_GROUPS]:
+        part = f"{len(members)} under {prefix}" if prefix else f"{len(members)} at the root"
+        # Named only when it is a spread: "across 1 directories" is noise, and the count
+        # is here to tell one package apart from ninety.
+        directories = {member.rsplit("/", 1)[0] for member in members if "/" in member}
+        if len(directories) > 1:
+            part += f" across {len(directories)} directories"
+        parts.append(part)
+    if len(ranked) > SHAPE_GROUPS:
+        rest = ranked[SHAPE_GROUPS:]
+        count = sum(len(members) for _, members in rest)
+        parts.append(f"{count} under {len(rest)} other prefixes")
+    return ", ".join(parts)
 
 
 def render_why(payload: dict[str, Any], *, presentation: bool = False) -> str:

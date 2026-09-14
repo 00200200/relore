@@ -291,8 +291,12 @@ relore status</pre>
       <p><code>--repo</code> is required on a bare number whenever more than one
          repository is in scope — a number alone would be ambiguous, and guessing would
          silently answer about the wrong project. The error lists what to choose from.</p>
-      <p><code>--compact</code> trims snippets for a tight context budget. A client may
-         ask for less; never for more.</p>
+      <p><code>--compact</code> trims snippets for a tight context budget, and serves a
+         <em>truncated</em> changed-file list as its shape — <code>92 under
+         src/transformers/ across 33 directories</code> — rather than as 100 paths whose
+         absence proves nothing. A client may ask for less; never for more. No count and
+         no caveat is ever trimmed, and <code>--json</code> carries every path either
+         way.</p>
 
       <h3>The code lens</h3>
       <p>The same questions, asked of the tree instead of the conversation. Four read this

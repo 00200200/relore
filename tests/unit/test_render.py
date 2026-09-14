@@ -120,6 +120,67 @@ def test_a_truncated_file_list_says_it_is_truncated() -> None:
     assert "TRUNCATED" in out
 
 
+def test_a_truncated_file_list_names_the_path_it_was_cut_after() -> None:
+    """`100 of 323` reads as a spread. It is a prefix: the per-PR pass takes GitHub's first
+    page and GitHub serves a diff in path order, so everything sorting after the last
+    collected path is missing whether or not it was touched. On the thread this came from
+    the cut was at `lfm2_moe` and the one interesting model was `mistral4`
+    (huggingface/relore#56)."""
+    payload = _thread(
+        files_changed=["src/a/one.py", "src/a/two.py"], files_total=323, files_collected=2
+    )
+
+    for out in (render_thread(payload), render_thread(payload, compact=True)):
+        assert "cut after src/a/two.py" in out
+        assert "absent whether or not the thread touched it" in out
+
+
+def test_compact_serves_a_truncated_file_list_as_its_shape() -> None:
+    """Half of a compact `thread 39847` was 100 paths the line above them says prove
+    nothing by their absence -- a budget flag spending its budget on the one list nothing
+    may be concluded from (huggingface/relore#11, huggingface/relore#56)."""
+    paths = [f"src/transformers/models/m{i}/modeling_m{i}.py" for i in range(100)]
+    paths += ["tests/models/test_rope.py", "docs/source/en/rope.md"]
+    payload = _thread(files_changed=paths, files_total=323, files_collected=102)
+
+    full, out = render_thread(payload), render_thread(payload, compact=True)
+
+    assert "100 under src/transformers/ across 100 directories" in out
+    # The cut point stays -- it is a caveat, not a path in a list.
+    assert "modeling_m50.py" not in out, "the shape replaces the paths"
+    assert "paths omitted under --compact" in out
+    assert len(out) < len(full) / 3
+    # The count, the denominator and the caveat are facts, so `--compact` keeps them.
+    assert "102 of 323 collected" in out and "TRUNCATED" in out
+    assert "src/transformers/models/m0/modeling_m0.py" in full
+
+
+def test_compact_keeps_a_complete_file_list() -> None:
+    """The shape is what a list that cannot answer a membership question is worth. A
+    complete one can, and answering it is the whole of what the paths are for."""
+    payload = _thread(files_changed=["src/a.py", "src/b.py"], files_total=2, files_collected=2)
+
+    out = render_thread(payload, compact=True)
+
+    assert "src/a.py, src/b.py" in out
+    assert "paths omitted" not in out
+
+
+def test_the_shape_counts_directories_only_when_they_spread() -> None:
+    """One edited package and a sweep across thirty-three are the two readings the line
+    exists to separate; `across 1 directories` separates nothing and costs tokens."""
+    payload = _thread(
+        files_changed=["pkg/mod/a.py", "pkg/mod/b.py", "README.md"],
+        files_total=9,
+        files_collected=3,
+    )
+
+    out = render_thread(payload, compact=True)
+
+    assert "2 under pkg/mod/, 1 at the root" in out
+    assert "across" not in out.split("cut after")[1].split("(paths omitted")[0]
+
+
 def test_a_complete_file_list_does_not_cry_truncation() -> None:
     out = render_thread(_thread(files_changed=["a.py", "b.py"], files_total=2, files_collected=2))
 
