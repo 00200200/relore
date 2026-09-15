@@ -154,7 +154,7 @@ def test_a_word_whose_history_fills_the_page_is_discarded(tmp_path) -> None:
         body = "# widely_edited\n" + "widely_edited = True\n" * n
         _commit(root, "mod.py", body, f"bump {n}", f"202{n}-01-01T00:00:00Z")
 
-    found = origin_history(root.as_posix(), "mod.py", 1, limit=2)
+    found = origin_history(root.as_posix(), "mod.py", 2, limit=2)
 
     assert found.commits == ()
     assert dict(found.considered)["widely_edited"] > 2, "it was tried, and it was unbounded"
@@ -181,6 +181,61 @@ def test_at_most_a_handful_of_words_are_pickaxed(repo) -> None:
     line, known = _asked(repo)
 
     assert len(origin_history(repo, "src/mod.py", line, known=known).considered) <= MAX_CANDIDATES
+
+
+def test_a_licence_header_is_not_five_pickaxes(tmp_path) -> None:
+    """**The slowest call this verb makes, for an answer knowable before the first
+    subprocess** (huggingface/relore#71).
+
+    `_block` is the line plus the comment above it, which is right for a line of code --
+    that is where the reason lives -- and on line 1 of a source file the block is the
+    licence header and nothing else. Measured against production: `why
+    src/transformers/masking_utils.py:1` and `modeling_llama.py:1` each spent five
+    `git log -S` passes on `Copyright`, `HuggingFace`, `rights`, `reserved` and `team`,
+    every one a full walk of that file's history because a term matching one commit never
+    fills the page early. 3.5-6.4 seconds, empty both times. Two of the web UI's three
+    sample buttons are that line, which is where the slowness was reported.
+    """
+    root = tmp_path / "tree"
+    root.mkdir()
+    _git(tmp_path, "init", "-q", "tree")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "t")
+    _commit(
+        root,
+        "mod.py",
+        "# Copyright 2026 HuggingFace Inc. team. All rights reserved.\nvalue = 1\n",
+        "add",
+        "2026-01-01T00:00:00Z",
+    )
+
+    found = origin_history(root.as_posix(), "mod.py", 1)
+
+    assert found.considered == (), "nothing was pickaxed"
+    assert found.declined == "comment"
+
+
+def test_a_blank_line_is_not_pickaxed_either(tmp_path) -> None:
+    root = tmp_path / "tree"
+    root.mkdir()
+    _git(tmp_path, "init", "-q", "tree")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "t")
+    _commit(root, "mod.py", "value = 1\n\nother = 2\n", "add", "2026-01-01T00:00:00Z")
+
+    assert origin_history(root.as_posix(), "mod.py", 2).declined == "comment"
+
+
+def test_an_exhausted_search_is_a_different_answer_from_a_skipped_one(repo) -> None:
+    """Only `no-candidate` means "the revision chain is the whole story". A reader cannot
+    tell that from a comment line or an unreadable file by the absence alone, and the page
+    printed nothing at all for every one of them."""
+    line, known = _asked(repo)
+    exhausted = origin_history(repo, "src/mod.py", line, known=known, limit=0)
+
+    assert exhausted.commits == ()
+    assert exhausted.declined == "no-candidate"
+    assert origin_history(repo, "src/nope.py", 1).declined == "unreadable"
 
 
 def test_keywords_are_not_candidates() -> None:

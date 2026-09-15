@@ -131,6 +131,12 @@ class Origin:
     term: str = ""
     commits: tuple[BlameCommit, ...] = ()
     considered: tuple[tuple[str, int], ...] = ()
+    #: Why there is no term, when there is none. An empty origin has three causes that a
+    #: reader cannot tell apart from the absence -- the line carries no code, every
+    #: candidate was rejected, or the file could not be read -- and only the middle one
+    #: means "the revision chain is the whole story". ``comment`` | ``no-candidate`` |
+    #: ``unreadable`` (huggingface/relore#71).
+    declined: str = ""
 
 
 #: Words that are never the distinguishing thing on a line. Short and unapologetically
@@ -279,10 +285,25 @@ def origin_history(
     known_commits = tuple(known)
     source = _read(root, path)
     if source is None:
-        return Origin()
+        return Origin(declined="unreadable")
     lines = source.splitlines()
     if not 1 <= line <= len(lines):
-        return Origin()
+        return Origin(declined="unreadable")
+
+    # **A line with no code on it has no behaviour to trace, and asking anyway is the
+    # slowest call this verb makes** (huggingface/relore#71). `_block` is the line plus the
+    # comment attached above it, which is right for a line of code -- that is where the
+    # reason lives -- and on line 1 of a source file the block is the licence header and
+    # nothing else. Measured against production, `why src/transformers/masking_utils.py:1`
+    # and `modeling_llama.py:1` each spent five `git log -S` passes on `Copyright`,
+    # `HuggingFace`, `rights`, `reserved` and `team`, every one of them a full walk of that
+    # file's history because a term matching one commit never fills the page early. 3.5-6.4
+    # seconds, and the answer was empty both times and knowably so before the first
+    # subprocess. Two of the web UI's three sample buttons are exactly this line, which is
+    # where the slowness was reported.
+    text = lines[line - 1].strip()
+    if not text or text.startswith(_COMMENT):
+        return Origin(declined="comment")
 
     counts: dict[str, int] = {}
     for word in _WORD.findall(source):
@@ -317,8 +338,9 @@ def origin_history(
         return Origin(term=word, commits=commits, considered=tuple(considered))
     # Nothing beat the revision chain. Saying so is the point: an empty `origin` next to a
     # full `history` means the line history *is* the whole story, which is a real answer
-    # and the one this verb used to give by omission.
-    return Origin(considered=tuple(considered))
+    # and the one this verb used to give by omission -- and went on giving by omission,
+    # since the renderer printed nothing at all for an empty origin (relore#71).
+    return Origin(considered=tuple(considered), declined="no-candidate")
 
 
 def _block(lines: list[str], line: int) -> str:

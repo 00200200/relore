@@ -149,6 +149,11 @@ def hit_json(hit: Hit, *, compact: bool = False) -> dict[str, Any]:
     # aggregate, and "1 of 1" would be a claim it cannot make.
     if hit.passages:
         out["passages"] = hit.passages
+    # Only where it is true, and only where somebody measured it: `search` does not, and a
+    # `false` it did not check would be a claim. The page uses it to decide whether it owes
+    # the caller the address of the rest (huggingface/relore#71).
+    if hit.truncated:
+        out["truncated"] = True
     if not compact:
         out["score"] = round(hit.score, 6)
         out["breakdown"] = {k: round(v, 6) for k, v in hit.breakdown.items()}
@@ -246,6 +251,9 @@ def why_json(view: WhyView, *, blame: Any) -> dict[str, Any]:
         "origin_considered": [
             {"term": term, "commits": count} for term, count in view.origin_considered
         ],
+        # Why the chain is empty, when it is. `comment` | `no-candidate` | `unreadable`,
+        # and they are three different answers (huggingface/relore#71).
+        "origin_declined": view.origin_declined,
     }
 
 
@@ -342,6 +350,11 @@ def thread_json(view: ThreadView, *, compact: bool = False) -> dict[str, Any]:
         # instead, so a caller never has to infer that from a count that did not shrink.
         "outline_matched": view.outline_matched,
         "outline_widened": view.outline_widened,
+        # What `--comment` asked for and what became of it. `absent` and `suppressed` are
+        # both "no comment came back" and are opposite next actions, so the page says which
+        # rather than leaving it to be inferred from an empty list (huggingface/relore#71).
+        "comment": view.comment,
+        "comment_status": view.comment_status,
         # Where a sweep resumed. A page that silently begins in the middle is worse than
         # one that stops, so the cursor travels with the page that honoured it.
         "after": view.after,

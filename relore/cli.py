@@ -250,6 +250,13 @@ def build_parser() -> argparse.ArgumentParser:
         "long thread instead of re-rolling the same page",
     )
     t.add_argument(
+        "--comment",
+        default="",
+        metavar="ID",
+        help="serve one comment whole, by the id in its line on a page or an outline "
+        "(a page cuts a long comment to a window)",
+    )
+    t.add_argument(
         "--files",
         action="store_true",
         help="also list the changed-file paths; the count and the truncation notice are "
@@ -448,6 +455,7 @@ def _thread(args: argparse.Namespace) -> int:
         "full": str(args.full).lower(),
         "outline": str(args.outline).lower(),
         "after": args.after,
+        "comment": args.comment,
         "files": str(args.files).lower(),
     }
     if repo := _repo(args):
@@ -458,7 +466,12 @@ def _thread(args: argparse.Namespace) -> int:
         payload,
         lambda: (
             payload.get("rendered")
-            or render_thread(payload, compact=_compact(args), presentation=_presentation(args))
+            or render_thread(
+                payload,
+                compact=_compact(args),
+                presentation=_presentation(args),
+                files=args.files,
+            )
         ),
     )
 

@@ -507,6 +507,155 @@ def test_the_anchored_and_mentioned_paths_are_not_gated() -> None:
     assert "src/aaa.py" not in out, "the diff's page is gated; these two are not"
 
 
+# -- the comment line, and the address on it (huggingface/relore#71) -------
+
+
+def test_a_comment_on_a_thread_page_does_not_reprint_the_page() -> None:
+    """A search hit has to say which thread it came from; a comment on a thread page does
+    not, and said it anyway. Measured on five real pages, `owner/repo#N pr`, the title
+    re-quoted under every comment and a 76-character URL were 24-33% of the whole page."""
+    payload = _thread(
+        comments_returned=1,
+        comments_total=1,
+        comments=[
+            {
+                "repo": "owner/name",
+                "number": 1,
+                "type": "pr",
+                "title": "a refactor",
+                "source_id": "2086096507",
+                "trust": "authoritative",
+                "age": "16mo",
+                "source_type": "review_comment",
+                "author": "maintainer",
+                "url": "https://github.com/owner/name/pull/1#discussion_r2086096507",
+                "snippet": "we can improve that description",
+            }
+        ],
+    )
+
+    out = render_thread(payload)
+    body = out.split("-- 1 of 1 comments")[1]
+
+    assert "2086096507  [authoritative]  16mo  review_comment  @maintainer" in body
+    assert "discussion_r2086096507" not in body, "the id is the address; the URL is not"
+    assert "a refactor" not in body, "the title is on the page's own head line"
+    assert "owner/name#1" not in body, "so is the thread"
+
+
+def test_a_search_hit_still_carries_the_thread_it_came_from() -> None:
+    """The other half: `search` spans threads, so every one of those three is load-bearing
+    there. One grammar per question, not one grammar."""
+    out = render_search(
+        {
+            "query": {"text": "rope"},
+            "hits": [
+                {
+                    "repo": "owner/name",
+                    "number": 7,
+                    "type": "pr",
+                    "title": "a refactor",
+                    "trust": "authoritative",
+                    "age": "3d",
+                    "source_type": "issue_comment",
+                    "url": "https://github.com/owner/name/pull/7#issuecomment-1",
+                    "snippet": "the answer",
+                }
+            ],
+        }
+    )
+
+    assert "owner/name#7" in out and "a refactor" in out and "issuecomment-1" in out
+
+
+def test_a_page_that_cut_a_comment_says_how_to_read_it_whole() -> None:
+    """A window ends in an ellipsis, which says *that* it was cut and nothing about undoing
+    it -- and until `--comment` nothing could. One line, and a fact, so both forms."""
+    payload = _thread(
+        comments_returned=2,
+        comments_total=2,
+        comments=[
+            {"source_id": "11", "snippet": "short", "trust": "reported", "age": "3d"},
+            {
+                "source_id": "12",
+                "snippet": "a long one…",
+                "trust": "reported",
+                "age": "3d",
+                "truncated": True,
+            },
+        ],
+    )
+
+    for out in (render_thread(payload), render_thread(payload, presentation=True)):
+        assert "1 of these is cut to a window" in out
+        assert "`--comment <id>` serves one whole" in out
+
+
+def test_a_page_that_withheld_nothing_does_not_advertise_the_address() -> None:
+    """Most insight for the fewest tokens: the line is owed only where something was cut."""
+    payload = _thread(
+        comments_returned=1,
+        comments_total=1,
+        comments=[{"source_id": "11", "snippet": "short", "trust": "reported", "age": "3d"}],
+    )
+
+    assert "--comment" not in render_thread(payload)
+
+
+def test_a_comment_served_whole_is_not_wrapped_in_a_page() -> None:
+    """A caller who named one comment has already been on the page -- that is where the id
+    came from. Two lines of identity so the quote can be cited, then the comment."""
+    payload = _thread(
+        comment="12",
+        comment_status="served",
+        body="the whole opening post, which is not what was asked for",
+        files_changed=["src/a.py"],
+        files_total=1,
+        files_collected=1,
+        labels=["bug"],
+        comments=[
+            {
+                "source_id": "12",
+                "trust": "authoritative",
+                "age": "4mo",
+                "source_type": "issue_comment",
+                "author": "maintainer",
+                "snippet": "the whole comment, all of it",
+                "passages": 3,
+            }
+        ],
+    )
+
+    out = render_thread(payload)
+
+    assert "-- comment 12, issue_comment, [authoritative], 4mo, @maintainer" in out
+    assert "3 passages, rejoined" in out and "28 characters, whole" in out
+    assert "the whole comment, all of it" in out
+    assert "the whole opening post" not in out
+    assert "changed files" not in out and "labels" not in out
+
+
+def test_an_id_this_thread_does_not_hold_says_which_kind_of_id_it_wanted() -> None:
+    payload = _thread(comment="999", comment_status="absent", comments=[])
+
+    out = render_thread(payload)
+
+    assert "this thread holds no comment with that id" in out
+    assert "not a position, and not the thread number" in out
+
+
+def test_a_suppressed_comment_is_not_reported_as_a_missing_one() -> None:
+    """Opposite next actions: stop looking, or ask what the bot claimed. An empty answer
+    cannot tell them apart (section 6.2, huggingface/relore#28)."""
+    payload = _thread(comment="13", comment_status="suppressed", comments=[])
+
+    piped = render_thread(payload)
+
+    assert "MACHINE" in piped and "excludes it" in piped
+    assert "--trust machine" not in piped, "the remedy is advice"
+    assert "--trust machine" in render_thread(payload, presentation=True)
+
+
 # -- the outline (huggingface/relore#70) -----------------------------------
 
 
@@ -1017,6 +1166,37 @@ def test_why_prints_the_widened_levels_and_a_next_step_rather_than_a_full_stop()
     assert "approved" in out
     assert "> check fullgraph" in out
     assert "relore thread 48630 --full" in out
+
+
+def test_an_empty_origin_says_why_it_is_empty(_=None) -> None:
+    """It used to render as nothing at all -- "the revision chain is the whole story",
+    given by omission, and not even always that answer (huggingface/relore#71)."""
+    base = _why(history=[{"sha": "a" * 40, "date": "2026-01-01", "summary": "one", "number": 1}])
+
+    comment = render_why({**base, "origin": [], "origin_declined": "comment"})
+    assert "this line carries no code" in comment
+
+    spent = render_why(
+        {**base, "origin": [], "origin_declined": "no-candidate", "origin_considered": [{}, {}]}
+    )
+    assert "no word on this line reaches further back" in spent
+    assert "2 candidate(s) tried" in spent
+
+    gone = render_why({**base, "origin": [], "origin_declined": "unreadable"})
+    assert "could not be read from the working clone" in gone
+    assert "Absence here is not evidence" in gone
+
+
+def test_an_origin_that_answered_says_nothing_about_declining() -> None:
+    out = render_why(
+        _why(
+            origin=[{"sha": "b" * 40, "date": "2024-03-06", "summary": "the one", "number": 9}],
+            origin_term="fullgraph",
+            origin_declined="",
+        )
+    )
+
+    assert "no origin chain" not in out
 
 
 def test_why_lists_the_lines_revisions_when_there_is_more_than_one() -> None:

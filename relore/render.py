@@ -185,6 +185,88 @@ def _hit_lines(index: int, hit: dict[str, Any], note: str = "") -> list[str]:
     return lines
 
 
+def _comment_lines(index: int, hit: dict[str, Any], note: str = "") -> list[str]:
+    """One comment *inside a thread page*, which is not the same line as one search hit.
+
+    A search hit has to say which thread it came from; a comment on a thread page does not,
+    and said it anyway. Measured on five real pages, ``owner/repo#N pr``, the thread's
+    title re-quoted under every comment, and a 76-character URL were **24-33% of the whole
+    page** -- three constants the head line already carries, reprinted ten times
+    (huggingface/relore#71).
+
+    What replaces the URL is the id, which was already in the payload and is what
+    ``--after`` and ``--comment`` take. A URL opens a browser and the caller reading this
+    page is not a browser; the id is the address, and :func:`render_thread` spends one line
+    at the foot of the page saying so instead of ten repeating it. Same three fields a
+    reader actually weighs a comment by -- tier, age, author -- in the same order as an
+    outline row, so the two views read as one grammar.
+    """
+    tier = TRUST_LABEL.get(str(hit.get("trust")), str(hit.get("trust")))
+    head = (
+        f"{index}. {hit.get('source_id') or ''}  [{tier}]  "
+        f"{hit.get('age')}  {hit.get('source_type')}"
+    )
+    if hit.get("author"):
+        head += f"  @{hit['author']}"
+    if note:
+        head += f"  ({note})"
+    lines = [head]
+    if hit.get("snippet"):
+        lines.append(f"   {quote(hit['snippet'])}")
+    lines.append("")
+    return lines
+
+
+def _one_comment_lines(thread: dict[str, Any], *, presentation: bool = False) -> list[str]:
+    """``--comment <id>``: the comment that id names, whole (huggingface/relore#71).
+
+    The three outcomes are three different sentences, because an empty answer cannot
+    distinguish them and they are opposite next actions: this thread has no such comment
+    (stop), or it has one and it is our own bot's, which section 6.2 excludes from evidence
+    (ask ``search --trust machine`` if the bot's claim is what you wanted).
+    """
+    asked = thread.get("comment") or ""
+    status = thread.get("comment_status") or ""
+    served = (thread.get("comments") or [None])[0] if status == "served" else None
+    if served is None:
+        if status == "suppressed":
+            return [
+                f"-- comment {asked}: MACHINE — our own bot, not evidence, so this view "
+                "excludes it (section 6.2) --"
+                + (
+                    "\n`relore search --trust machine` asks what the bots claimed."
+                    if presentation
+                    else ""
+                )
+            ]
+        return [
+            f"-- comment {asked}: this thread holds no comment with that id. It is a "
+            "comment's own GitHub id, off an outline line or a page's head line -- not a "
+            "position, and not the thread number --"
+        ]
+    tier = TRUST_LABEL.get(str(served.get("trust")), str(served.get("trust")))
+    text = served.get("snippet") or ""
+    clauses = [
+        f"-- comment {asked}, {served.get('source_type')}",
+        f"[{tier}]",
+        f"{served.get('age')}",
+    ]
+    if served.get("author"):
+        clauses.append(f"@{served['author']}")
+    passages = int(served.get("passages") or 1)
+    if passages > 1:
+        # It was indexed in pieces and is served rejoined, which is worth one clause: a
+        # reader who met this comment on a page as "passage 4 of 7" needs to know this is
+        # not a fourth seventh.
+        clauses.append(f"{passages} passages, rejoined")
+    clauses.append(f"{len(text)} characters, whole")
+    lines = [", ".join(clauses) + " --", quote(text)]
+    if served.get("url"):
+        # Once, on the one page a person is likely to want to cite or open.
+        lines.append(served["url"])
+    return lines
+
+
 def _outline_lines(
     thread: dict[str, Any], outline: list[dict[str, Any]], *, presentation: bool = False
 ) -> list[str]:
@@ -281,6 +363,15 @@ def render_thread(
         f"{thread.get('state')}  {thread.get('age')}",
         quote(thread.get("title", "")),
     ]
+    if thread.get("comment"):
+        # **A page's worth of preamble is not what "read this one comment" asked for.**
+        # The events, the diff's counts, the links and the opening post are what a reader
+        # weighs a *thread* by; a caller who named one comment has already been on that
+        # page -- that is where the id came from. Two lines of identity so the quote can be
+        # cited, then the comment. Measured on `transformers#46419`: 1,941 bytes with the
+        # full header, 480 without (huggingface/relore#71).
+        lines += ["", *_one_comment_lines(thread, presentation=presentation)]
+        return envelope("\n".join(lines).rstrip(), source=thread.get("url"), compact=compact)
     if thread.get("author"):
         lines.append(f"opened by @{thread['author']}")
     lines += _event_lines(thread)
@@ -367,7 +458,19 @@ def render_thread(
             "comment, in order, with the id to resume from."
         )
     for index, comment in enumerate(comments, start=1):
-        lines += _hit_lines(index, comment, note=_passage_note(comment, comments))
+        lines += _comment_lines(index, comment, note=_passage_note(comment, comments))
+    # **The anchor, once, and only when it is owed.** A window that ends in an ellipsis
+    # says it was cut and nothing about undoing it, and until `--comment` nothing could:
+    # `--full` is the opening post, `--focus` re-ranks and snippets again, `--after` serves
+    # the *next* comments. The id in each head line is the address; this is the sentence
+    # that makes it one, and it costs ~20 tokens where the ten URLs it replaced cost ~250
+    # (huggingface/relore#71). Not printed on a page that withheld nothing.
+    if any(c.get("truncated") for c in comments):
+        cut = sum(1 for c in comments if c.get("truncated"))
+        lines.append(
+            f"({cut} of these {'is' if cut == 1 else 'are'} cut to a window: "
+            "`--comment <id>` serves one whole, by the id in its line above.)"
+        )
     if visible > returned:
         # **The way to the rest is a fact, in both forms** (huggingface/relore#71). This
         # line is the one place a caller learns what a capped page means, and it used to
@@ -706,6 +809,30 @@ def _chains(payload: dict[str, Any], *, presentation: bool = False) -> list[str]
                     + ", ".join(f"{c.get('term')}={c.get('commits')}" for c in considered)
                     + f"; `{term}` reached furthest back without filling the page)"
                 )
+        return lines
+
+    # **An empty origin used to render as nothing at all**, which is the answer
+    # "the revision chain is the whole story" given by omission -- and it is not even
+    # always that answer (huggingface/relore#71). Three causes, three sentences, because a
+    # reader cannot separate them from a silence and they do not mean the same thing.
+    declined = payload.get("origin_declined") or ""
+    if declined == "comment":
+        lines.append(
+            "(no origin chain: this line carries no code, so there is no behaviour on it "
+            "to follow back. The revisions above are its whole history.)"
+        )
+    elif declined == "no-candidate":
+        tried = payload.get("origin_considered") or []
+        lines.append(
+            "(no origin chain: no word on this line reaches further back than the "
+            f"revisions above, so they are the whole story — not a gap. {len(tried)} "
+            "candidate(s) tried.)"
+        )
+    elif declined == "unreadable":
+        lines.append(
+            "(no origin chain: this file could not be read from the working clone, so the "
+            "word history was never asked for. Absence here is not evidence.)"
+        )
     return lines
 
 

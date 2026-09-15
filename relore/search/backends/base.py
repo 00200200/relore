@@ -45,6 +45,7 @@ from relore.ingest.extract import CHANGED, FROM_COMMENT, MENTIONED
 from relore.search.queries import (
     AFTER_CURSOR,
     BODY_SLACK_CHARS,
+    COMMENT_VIEW,
     ENDS_AND_MIDDLE,
     HUMAN_TRUST,
     MACHINE_TRUST,
@@ -53,6 +54,7 @@ from relore.search.queries import (
     MAX_CLAIMS,
     MAX_HITS_PER_THREAD,
     MAX_OUTLINE_COMMENTS,
+    MAX_SNIPPET_CHARS,
     MAX_THREAD_COMMENTS,
     OUTLINE_CHARS,
     OUTLINE_VIEW,
@@ -92,6 +94,7 @@ class _Comments(NamedTuple):
     outline: tuple[Hit, ...] = ()
     outline_matched: int | None = None
     outline_widened: bool = False
+    comment_status: str = ""
 
 
 class SearchBackend(ABC):
@@ -529,6 +532,7 @@ class SearchBackend(ABC):
         full: bool = False,
         after: str = "",
         outline: bool = False,
+        comment: str = "",
     ) -> ThreadView | None:
         """One thread, capped (section 6).
 
@@ -594,7 +598,7 @@ class SearchBackend(ABC):
             meta = row._mapping["metadata"] or {}
             changed = meta.get("changed_files")
             body, body_chars, body_truncated = self._body(conn, row.id, full=full)
-            page = self._comments(conn, row, focus, after=after, outline=outline)
+            page = self._comments(conn, row, focus, after=after, outline=outline, comment=comment)
 
         return ThreadView(
             repo=row.repo,
@@ -633,6 +637,8 @@ class SearchBackend(ABC):
             outline_total=len(page.outline),
             outline_matched=page.outline_matched,
             outline_widened=page.outline_widened,
+            comment=comment,
+            comment_status=page.comment_status,
             after=after,
         )
 
@@ -724,6 +730,7 @@ class SearchBackend(ABC):
                     origin=introduced,
                     origin_term=str(getattr(origin, "term", "") or ""),
                     origin_considered=tuple(getattr(origin, "considered", ()) or ()),
+                    origin_declined=str(getattr(origin, "declined", "") or ""),
                 )
             at_line, on_file, reviews, level = _argument(conn, number, path, line, window)
         return WhyView(
@@ -743,6 +750,7 @@ class SearchBackend(ABC):
             origin=introduced,
             origin_term=str(getattr(origin, "term", "") or ""),
             origin_considered=tuple(getattr(origin, "considered", ()) or ()),
+            origin_declined=str(getattr(origin, "declined", "") or ""),
         )
 
     # -- what is already being worked on ---------------------------------
@@ -868,7 +876,14 @@ class SearchBackend(ABC):
         return snippet(whole, limit=MAX_BODY_CHARS), len(whole), True
 
     def _comments(
-        self, conn: Any, thread: Any, focus: str, *, after: str = "", outline: bool = False
+        self,
+        conn: Any,
+        thread: Any,
+        focus: str,
+        *,
+        after: str = "",
+        outline: bool = False,
+        comment: str = "",
     ) -> _Comments:
         def documents(tiers: tuple[str, ...]) -> Select:
             return select(
@@ -903,6 +918,19 @@ class SearchBackend(ABC):
         # a thread we hold one for, which is the sentence for a thread nobody has touched
         # (huggingface/relore#28). Counted here because only this query knows.
         suppressed = len(_passage_counts(conn, documents((MACHINE_TRUST,))))
+
+        if comment.strip():
+            # One addressed document, served whole, and it short-circuits everything the
+            # page would have computed. Nothing here selects: the caller named the row.
+            served, status = self._one_comment(conn, thread, comment.strip(), passages)
+            return _Comments(
+                hits=served,
+                total=total,
+                matched=None,
+                selection=COMMENT_VIEW,
+                suppressed=suppressed,
+                comment_status=status,
+            )
 
         if outline:
             # The outline *replaces* the page (``render_thread`` returns after it), so the
@@ -967,12 +995,96 @@ class SearchBackend(ABC):
                 source_id=str(row.source_id or ""),
                 chunk_index=int(row.chunk_index or 0),
                 passages=passages.get((row.source_type, row.source_id), 1),
+                # Measured against the raw text, not inferred from the ellipsis the window
+                # ends with: the page uses this to decide whether it owes the caller the
+                # address of the rest, and a fact about withholding is not something to
+                # read back off a glyph.
+                truncated=len(" ".join((row.body_text or "").split())) > MAX_SNIPPET_CHARS,
             )
             for row in rows
         )
         return _Comments(
             hits=hits, total=total, matched=matched, selection=selection, suppressed=suppressed
         )
+
+    def _one_comment(
+        self, conn: Any, thread: Any, comment: str, passages: dict[tuple[str, str], int]
+    ) -> tuple[tuple[Hit, ...], str]:
+        """One comment, whole, by the id the page prints beside it (huggingface/relore#71).
+
+        **The id on a page was an ornament until this existed.** A comment longer than
+        :data:`~relore.search.queries.MAX_SNIPPET_CHARS` comes back as a window with an
+        ellipsis -- which says *that* it was cut and offers nothing that undoes it:
+        ``--full`` is the opening post, ``--focus`` re-ranks and snippets again, ``--after``
+        serves the *next* comments. So the page disclosed a gap it could not close, which
+        is the shape this project keeps re-finding, and every comment carried a 76-character
+        URL that was not an address either -- it opens a browser, and the caller reading the
+        page is not a browser. One line per page naming this flag costs ~20 tokens where
+        ten URLs cost ~250.
+
+        Whole, with no cap of its own, on the same bargain ``--full`` already makes: the
+        caps exist so a *sample* is not mistaken for a corpus, and a document asked for by
+        its id is the opposite of a sample. Measured on the transformers corpus, a comment's
+        median length is 120 characters and its 99th percentile 2,186 -- the cap would fire
+        on a handful of threads and leave them with no way through, which is what it would
+        have been added to prevent.
+
+        Three outcomes, named rather than left to an empty answer: ``served``, ``absent``
+        (this thread holds no such comment), and ``suppressed`` (it does, and it is our own
+        bot's, so section 6.2 excluded it). A caller cannot tell the last two apart from
+        outside, and they are opposite next actions -- stop looking, or ask
+        ``search --trust machine``.
+        """
+
+        def whole(tiers: tuple[str, ...]) -> list[Any]:
+            return list(
+                conn.execute(
+                    select(
+                        s.documents.c.source_type,
+                        s.documents.c.source_id,
+                        s.documents.c.chunk_index,
+                        s.documents.c.url,
+                        s.documents.c.author,
+                        s.documents.c.trust,
+                        s.documents.c.body_text,
+                        s.documents.c.github_created_at,
+                    )
+                    .where(
+                        s.documents.c.thread_id == thread.id,
+                        s.documents.c.source_type.notin_(("title", "body")),
+                        s.documents.c.source_id == comment,
+                        s.documents.c.trust.in_(tiers),
+                    )
+                    .order_by(s.documents.c.chunk_index.asc())
+                )
+            )
+
+        rows = whole(admissible_trust(None))
+        if not rows:
+            return (), "suppressed" if whole((MACHINE_TRUST,)) else "absent"
+        head = rows[0]
+        # The chunker splits on boundaries and the pieces are re-joined in order, so what
+        # comes back is the comment as it was written -- not a concatenation of windows.
+        body = "\n".join(row.body_text or "" for row in rows).strip()
+        return (
+            Hit(
+                repo=thread.repo,
+                number=int(thread.github_number),
+                thread_type=thread.thread_type,
+                title=thread.title,
+                source_type=head.source_type,
+                url=head.url,
+                author=head.author,
+                trust=head.trust,
+                age=render_age(head.github_created_at),
+                snippet=body,
+                score=0.0,
+                created_at=head.github_created_at,
+                source_id=str(head.source_id or ""),
+                chunk_index=0,
+                passages=passages.get((head.source_type, head.source_id), len(rows)),
+            ),
+        ), "served"
 
     def _outline(
         self,

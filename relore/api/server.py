@@ -308,18 +308,20 @@ def build_app(
         full: bool = False,
         after: str = "",
         outline: bool = False,
+        comment: str = "",
         files: bool = False,
     ) -> Response:
         """One thread, capped (section 6). See :func:`_one_repo` for ``repo``.
 
-        ``outline`` and ``after`` are the two ways past the cap without raising it, and
-        ``files`` is what the diff's path list costs when nobody asked for it -- see
+        ``outline`` and ``after`` are the two ways past the cap without raising it,
+        ``comment`` serves one addressed document whole, and ``files`` is what the diff's
+        path list costs when nobody asked for it -- see
         :meth:`~relore.search.backends.base.SearchBackend.thread` and
         :func:`~relore.render._file_lines` (relore#70).
         """
         repo = _one_repo(token, repo)
         view = deps.backend.thread(
-            repo, number, focus=focus, full=full, after=after, outline=outline
+            repo, number, focus=focus, full=full, after=after, outline=outline, comment=comment
         )
         if view is None:
             raise HTTPException(status_code=404, detail=f"{repo}#{number} not found")

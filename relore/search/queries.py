@@ -61,6 +61,11 @@ AFTER_CURSOR = "after"
 #: be able to tell apart. Chronological and complete to its cap, so neither "sampled" nor
 #: "ranked" describes it.
 OUTLINE_VIEW = "outline"
+#: What ``--comment <id>`` reports. Not a page either: one addressed document, served
+#: whole, which is the same bargain ``--full`` makes for the opening post -- a caller who
+#: named one thing gets that thing, because the caps exist to stop a *sample* being
+#: mistaken for a corpus, and a document asked for by its id is the opposite of a sample.
+COMMENT_VIEW = "comment"
 #: How many of the ten each end gets. Small on purpose: the opening states the problem and
 #: the last word is usually the resolution, but everything else that matters is between
 #: them.
@@ -235,6 +240,13 @@ class Hit:
     #: counted here" rather than "one": the corpus-wide search path does not pay for the
     #: aggregate, and the renderer says nothing rather than something wrong.
     passages: int = 0
+    #: Whether ``snippet`` is a window onto something longer. The window discloses itself
+    #: with an ellipsis, which says *that* it was cut and not how to undo it -- and until
+    #: ``--comment`` there was no way to undo it at all: ``--full`` is the opening post,
+    #: ``--focus`` re-ranks and snippets again, ``--after`` serves the *next* comments. So
+    #: the page that cut a comment is the page that has to name the address, and this is
+    #: what tells it one was cut (huggingface/relore#71).
+    truncated: bool = False
     #: Every term of the score, for the human tuning the weights (section 8). An agent has
     #: no use for *why* something ranked; the person has nothing else. Dropped by
     #: ``--compact``.
@@ -341,6 +353,13 @@ class ThreadView:
     #: A zero-row page whose emptiness is a property of the question is the failure
     #: huggingface/relore#47 was opened for; this is the same answer, one verb over.
     outline_widened: bool = False
+    #: The comment ``--comment`` asked for, echoed, and what happened to it. A caller who
+    #: gets an empty answer to an id cannot tell "this thread has no such comment" from
+    #: "that comment is our own bot's and the trust floor dropped it" (section 6.2), and
+    #: those are opposite next actions -- so the status is named rather than inferred from
+    #: an absence. ``served`` | ``absent`` | ``suppressed``.
+    comment: str = ""
+    comment_status: str = ""
     #: The comment this page starts after, if the caller was sweeping (``--after``). A page
     #: that silently begins in the middle is the one thing worse than a page that stops.
     after: str = ""
@@ -419,6 +438,12 @@ class WhyView:
     #: judgement, and a page that does not show its working cannot be argued with.
     origin_term: str = ""
     origin_considered: tuple[tuple[str, int], ...] = ()
+    #: Why the origin chain is empty, when it is. Three causes a reader cannot separate
+    #: from the absence -- the line carries no code, every candidate was rejected, the file
+    #: could not be read -- and only the middle one means "the revision chain is the whole
+    #: story". The page printed *nothing* for an empty origin, which is that answer given
+    #: by omission (huggingface/relore#71).
+    origin_declined: str = ""
 
 
 @dataclass(frozen=True)

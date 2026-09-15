@@ -561,6 +561,33 @@ complete one: `transformers#46419` goes from `100 of 639` at 3,179 tokens to `40
 fact — the run had read `--outline` in `--help` and rolled `--focus` four more times — so
 the page line is the cheap experiment and the narrowing is what the trace pointed at.
 
+**An address beats a repetition, and a page's constants are not per-row facts.** A comment
+line inside a thread carried `owner/repo#N pr`, the thread's title re-quoted, and a
+76-character URL — three things the page's own head line already has, reprinted ten times,
+and measured on five real pages at **24–33% of the whole page**. `search` keeps all three
+because it spans threads; a thread page does not span anything. What replaces them is the
+id, which was already in the payload — and an id is only an address if something takes it,
+so **`--comment <id>`** serves one comment whole. It had to exist: a page cuts a long
+comment to a 400-character window ending in `…`, and nothing undid that — `--full` is the
+opening post, `--focus` re-ranks and snippets again, `--after` serves the *next* comments.
+The page disclosed a gap it could not close. One line at the foot of a page that actually
+cut something costs ~20 tokens where ten URLs cost ~250, and it is printed only when owed.
+
+**The slowest call this API makes was five subprocesses for an answer knowable before the
+first one.** `why`'s origin pass pickaxes candidate words out of the line *and the comment
+attached above it* — right for a line of code, that is where the reason lives — so on line
+1 of a source file it pickaxes the licence header. Measured against production,
+`why src/transformers/masking_utils.py:1` and `modeling_llama.py:1` each ran five
+`git log -S` passes on `Copyright`, `HuggingFace`, `rights`, `reserved` and `team`, every
+one a full walk of that file's history because a term matching one commit never fills the
+page early: **3.98s and 6.35s**, against 1.77s for a line whose first candidate was
+accepted. Both answers were empty. **A line with no code on it has no behaviour to trace**,
+so it now declines the pickaxe — and *says* it declined, because an empty origin rendered
+as nothing at all, which is "the revision chain is the whole story" given by omission and
+was not even always that answer. Three causes, three sentences. Two of the web UI's three
+`why` sample buttons are that line, which is where a person noticed the product was slow:
+**a sample strip is a latency surface, and it was pointing at the worst case.**
+
 **An age is for reading; a date is for citing, and the page owes both.** Every comment,
 review and hit renders `8mo`, `15mo` — right for a reader, and not enough to *quote*, which
 is what an agent is asked for ("the decisive comment, with its author and its date"). With

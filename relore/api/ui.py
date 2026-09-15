@@ -536,6 +536,15 @@ const SAMPLES = [
 // a file is for, and what one line of logic was for. Line 1 is the stable one -- it is
 // the file's own introduction, and it cannot drift the way a line in the middle does
 // when the clone moves to a newer HEAD.
+//
+// It was also, until relore#71, the slowest call this API makes. `why`'s origin pass
+// pickaxes candidate words out of the line and the comment attached above it, and on line
+// 1 that block is the licence header: five `git log -S` passes on `Copyright`,
+// `HuggingFace`, `rights`, `reserved` and `team`, each a full walk of the file's history,
+// for an answer that was empty and knowably so. Two of these three buttons are that line,
+// which is why this strip was where the slowness got noticed. A line with no code on it
+// now declines the pickaxe and says it did, so the sample is one blame rather than six
+// subprocesses -- measured against production at 3.98s and 6.35s before.
 const WHY_SAMPLES = [
   {label: "what is this file for?",
    at: "src/transformers/masking_utils.py:1", repo: "huggingface/transformers"},

@@ -332,6 +332,52 @@ also what you get by sweeping from a SAMPLED page, whose last row is the thread'
 comment.
 ```
 
+### `--comment <id>`: one comment, whole
+
+A page cuts a long comment to a 400-character window ending in `…`, which says *that* it
+was cut and nothing about undoing it — and until this flag nothing could: `--full` is the
+opening post, `--focus` re-ranks and snippets again, `--after` serves the *next* comments.
+
+```
+$ relore thread 46419 --comment 4623100975 --repo huggingface/transformers
+huggingface/transformers#46419 pr  closed  3mo
+> Port ESMC and ESMFold2 to Transformers
+
+-- comment 4623100975, issue_comment, [contributor claim], 3mo, @HuggingFaceDocBuilderDev, 161 characters, whole --
+> The docs for this PR live here. All of your documentation changes will be reflected…
+https://github.com/huggingface/transformers/pull/46419#issuecomment-4623100975
+```
+
+Whole, with no cap of its own, on the same bargain `--full` makes: the caps exist so a
+*sample* is not mistaken for a corpus, and a document asked for by its id is the opposite
+of a sample. (On the transformers corpus a comment's median length is 120 characters and
+its 99th percentile 2,186.)
+
+Two lines of identity and then the comment — not the whole page. A caller who named one
+comment has already been on that page; that is where the id came from.
+
+**The id is the address, and the page no longer repeats a URL to say so.** A comment line
+inside a thread used to carry `owner/repo#N pr`, the thread's title re-quoted, and a
+76-character URL — three constants the page's own head line already has, reprinted ten
+times. Measured on five real pages that was **24–33% of the whole page** (#71). What
+replaces them is the id, which `--after` and `--comment` both take, and one line at the
+foot of a page that actually cut something:
+
+```
+1. 2086096507  [authoritative]  16mo  review_comment  @ArthurZucker
+   > we can improve that description a bit with a proper example
+…
+(1 of these is cut to a window: `--comment <id>` serves one whole, by the id in its line above.)
+```
+
+`search` keeps all three, because it spans threads and there every one of them is
+load-bearing. One grammar per question, not one grammar.
+
+Three outcomes, named rather than left to an empty answer — `served`, `absent` (this thread
+holds no such comment) and `suppressed` (it does, and it is our own bot's, which §6.2
+excludes). A caller cannot tell the last two apart from outside and they are opposite next
+actions.
+
 ### `--files`: the diff's paths, on request
 
 The changed-file **count**, its truncation notice, and *that the paths were withheld* are
@@ -587,9 +633,28 @@ reaches further back than the line already does. A candidate whose history fills
 unbounded and skipped; one that stops no earlier than the revision chain has added nothing
 and is skipped. `--presentation` (a TTY) also prints what it tried and what each reached.
 
-An empty origin list is a real answer — the revision chain *is* the whole story — and is not
-the same as the pickaxe not having run. What this still cannot follow is a **renamed**
-symbol, which is milestone 4's rename chains.
+**An empty origin list is a real answer, and it now says which answer** (#71). It printed
+nothing at all, which is "the revision chain is the whole story" given by omission — and it
+was not even always that answer. Three causes, three sentences:
+
+```
+(no origin chain: no word on this line reaches further back than the revisions above,
+ so they are the whole story — not a gap. 4 candidate(s) tried.)
+(no origin chain: this line carries no code, so there is no behaviour on it to follow back.)
+(no origin chain: this file could not be read from the working clone… Absence here is not evidence.)
+```
+
+**A line with no code on it does not get pickaxed at all, and that was the slow path.** The
+candidates come from the line *and the comment attached above it* — right for a line of
+code, that is where the reason lives — and on line 1 of a source file the block is the
+licence header. Measured against production, `why src/transformers/masking_utils.py:1` and
+`modeling_llama.py:1` each spent five `git log -S` passes on `Copyright`, `HuggingFace`,
+`rights`, `reserved` and `team`, every one a full walk of that file's history because a
+term matching one commit never fills the page early: **3.98s and 6.35s**, against 1.77s for
+a line whose first candidate was accepted and ~0.6s of baseline. Two of the web UI's three
+`why` sample buttons are exactly that line, which is where it got noticed.
+
+What this still cannot follow is a **renamed** symbol, which is milestone 4's rename chains.
 
 **When the line window is empty, it widens rather than stopping (#63, #64).** In order,
 labelled, so a widened answer is never read as an exact one: comments on the line →
