@@ -64,14 +64,14 @@ $ relore inflight 48630
    > fix: respect partial_rotary_factor in GPTNeoXJapaneseRotaryEmbedding
 ```
 
-We put `inflight` early in `--help because it is usually the question an agent
+We put `inflight` early in `--help` because it is usually the question an agent
 should answer first.
 
-Once the agent gets the overview of the situation, it digs into the discussions
-with `thread` where there is a clear distinction between contributors, bots and maintainers,
-then does a couple of `search` calls and looks at the code via `copies` and/or `defs`.
+From there, an agent can dig into the discussion with `thread`, distinguishing
+contributors, bots, and maintainers; search repository history; then inspect
+the code with `copies`` or `defs`.
 
-In one field test, the agent reported that relore defs gave it a better
+In one field test, the agent reported that `relore defs` gave it a better
 overview of a file than reading the whole thing, for roughly 5% of the tokens.
 
 See the [field report](https://github.com/huggingface/relore/issues/8) it filed at the end of the run. 
@@ -86,7 +86,7 @@ regression across models.
 ## One run, end to end
 
 The [field report](https://github.com/huggingface/relore/issues/8) for our earlier bug shows
-the complete flow:
+the core flow:
 
 - read the issue and separated the maintainer's comment from the contributor's,
   which is what reframed the task;
