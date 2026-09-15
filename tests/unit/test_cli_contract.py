@@ -118,11 +118,19 @@ def test_thread_narrows_an_outline_with_the_focus_it_already_has() -> None:
     assert (args.outline, args.focus) == (True, "rope")
 
 
+def test_thread_addresses_one_comment_by_its_id() -> None:
+    """The id in a page's head line is the address, and an address is only one if something
+    takes it (huggingface/relore#71)."""
+    args = cli.build_parser().parse_args(["thread", "1", "--comment", "2086096507"])
+
+    assert args.comment == "2086096507"
+
+
 def test_thread_defaults_to_the_page_it_always_served() -> None:
-    """All three are additive: the default page is what it was before any of this."""
+    """All four are additive: the default page is what it was before any of this."""
     args = cli.build_parser().parse_args(["thread", "1"])
 
-    assert (args.outline, args.after, args.files) == (False, "", False)
+    assert (args.outline, args.after, args.files, args.comment) == (False, "", False, "")
 
 
 def _dest(flag: str) -> str:

@@ -195,6 +195,33 @@ def test_the_score_is_json_only(wired, engine, fake, capsys) -> None:
     assert '"score"' in _run(capsys, "search", "findable", "--json")
 
 
+def test_a_comment_is_reachable_whole_end_to_end(wired, engine, fake, capsys) -> None:
+    """Client to daemon to database and back: the id a page prints is an address
+    (huggingface/relore#71). The whole point is the part a window cut off."""
+    pr = fake.add_pr(1, title="a long argument", body="the opening")
+    fake.add_comment(pr, 100, "prelude. " * 80 + "THE-BURIED-POINT")
+    _index(engine, fake, 1)
+
+    page = _run(capsys, "thread", "1")
+    assert "THE-BURIED-POINT" not in page, "a page cuts it to a window"
+    assert "`--comment <id>` serves one whole" in page
+
+    whole = _run(capsys, "thread", "1", "--comment", "100")
+    assert "THE-BURIED-POINT" in whole
+    assert "comment 100" in whole and "whole" in whole
+
+
+def test_an_id_the_thread_does_not_hold_is_a_sentence_not_a_404(
+    wired, engine, fake, capsys
+) -> None:
+    fake.add_pr(1, body="the opening")
+    _index(engine, fake, 1)
+
+    out = _run(capsys, "thread", "1", "--comment", "999999")
+
+    assert "holds no comment with that id" in out
+
+
 def test_thread_states_how_much_it_withheld(wired, engine, fake, capsys) -> None:
     pr = fake.add_pr(1, title="a long argument", body="the opening")
     for i in range(40):

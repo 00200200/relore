@@ -314,8 +314,10 @@ def run_task(
     checkout: str | None,
     max_calls: int,
     tool_timeout: float,
+    run_timeout: float,
     temperature: float,
     client: httpx.Client,
+    log: Any = None,
 ) -> Run:
     tools, tool_name = build_tools(arm, checkout)
     evidence = [str(n) for n in task.get("evidence", [])]
@@ -337,6 +339,13 @@ def run_task(
     started = time.perf_counter()
 
     while len(run.calls) <= max_calls:
+        # A budget on the *run*, not only on each call. One sweep spent 50 minutes inside
+        # one task because a model kept asking for more; a harness that cannot be left
+        # alone is one nobody leaves alone, and a hung arm silently costs the comparison
+        # its other half.
+        if time.perf_counter() - started > run_timeout:
+            run.stopped = "run_timeout"
+            break
         body: dict[str, Any] = {
             "model": f"{model}:{provider}" if provider else model,
             "messages": messages,
@@ -431,6 +440,19 @@ def run_task(
                 )
             )
             messages.append({"role": "tool", "tool_call_id": tool_call["id"], "content": out})
+            if log:
+                last = run.calls[-1]
+                # Per call, not per run. A run that prints nothing for ten minutes is
+                # indistinguishable from a dead one, and the first sweep of this harness
+                # was in fact two processes racing and neither was visible.
+                print(
+                    f"    [{last.index:2}] {name} {' '.join(args)[:70]:70} "
+                    f"{last.chars:6d} B  {last.wall_ms:6.0f} ms"
+                    + ("  REFUSED" if last.refused else "")
+                    + ("  ← evidence" if last.reached_evidence else ""),
+                    file=log,
+                    flush=True,
+                )
 
     run.wall_s = time.perf_counter() - started
     run.ok = run.stopped == "answered"
@@ -600,6 +622,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--checkout", default=None, help="a clone, to add a grep tool")
     parser.add_argument("--max-calls", type=int, default=30)
     parser.add_argument("--tool-timeout", type=float, default=90.0)
+    parser.add_argument(
+        "--run-timeout", type=float, default=600.0, help="wall budget for one task+arm"
+    )
+    parser.add_argument("--quiet", action="store_true", help="one line per run, not per call")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--out", type=Path, default=None, help="directory for the trace and report")
     parser.add_argument(
@@ -640,8 +666,10 @@ def main(argv: list[str] | None = None) -> int:
                         checkout=args.checkout,
                         max_calls=args.max_calls,
                         tool_timeout=args.tool_timeout,
+                        run_timeout=args.run_timeout,
                         temperature=args.temperature,
                         client=client,
+                        log=None if args.quiet else sys.stderr,
                     )
                     run.task = label
                     runs.append(run)
