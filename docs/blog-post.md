@@ -11,9 +11,10 @@ writing a third patch without knowing there were already two. This happened
 because `gh issue view` did not link all those events together and 
 it's easy to miss.
 
-The `gh` client can be used to investigate through all PR and issues comments, 
-but has some limitations where the important data can be 
-missed or hard to recollect. 
+`gh` can fetch any individual issue, PR, or comment. The hard part is knowing
+which ones to fetch: the fix may live in another PR, the rationale in a review
+comment, and the relevant maintainer decision in a thread the current issue
+never links to.
 
 `relore` is what we built to improve this, an index of a repository's own
 history optimized for agents. Coding agents can search code, but they usually 
@@ -28,9 +29,13 @@ in years of GitHub discussions.
 
 ## What relore is
 
-`relore` (REpository LORE) indexes a repository's complete issue and
-pull-request history — issues, PRs, comments, reviews, commit messages and the
-relationships between them — and keeps a working clone of the repository beside
+Search alone isn't enough. Repository history contains maintainer decisions,
+contributor hypotheses, automated reviews, and bot-generated text, and those
+should not carry the same weight. `relore` (REpository LORE) records who said
+what, distinguishes authoritative project decisions from contributor claims,
+and keeps machine-generated content out of the default evidence set.
+
+It also keeps a working clone of the repository beside
 it, both served over one HTTP API.
 
 ![Relore sits between a repository's history and its current code, and answers an agent's questions against both.](relore-diag.png)
@@ -64,8 +69,8 @@ then does a couple of `search` calls and looks at the code via `copies` and/or `
 An agent in one of our field tests reported that
 `relore defs` gave it a better overview of a file than reading the whole thing.
 
-In that run, asking for the structure first and reading only what mattered was
-more than an order of magnitude cheaper.
+In that run, `defs` gave the agent the overview it needed for roughly 5% of the
+tokens it estimated for reading the whole file.
 
 See the [field report](https://github.com/huggingface/relore/issues/8) it filed at the end of the run. 
 
