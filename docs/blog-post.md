@@ -70,8 +70,7 @@ more than an order of magnitude cheaper.
 See the [field report](https://github.com/huggingface/relore/issues/8) it filed at the end of the run. 
 
 `grep` and `rg` return matching lines and leave the model to
-reconstruct the program structure around them. Asking for the structure first,
-then reading only what matters,
+reconstruct the program structure around them.
 
 Provenance mattered just as much: distinguishing maintainer guidance from
 contributor claims changed the task from fixing one model to auditing the
