@@ -269,20 +269,32 @@ export RELORE_DATABASE_URL=postgresql://localhost/relore
 export GITHUB_TOKEN=...   # issues:read + pull_requests:read, never write
 
 relored migrate
-relored backfill --repo owner/name && relored authority --repo owner/name
-relored clone    --repo owner/name    # the working clone the code verbs read
+relored backfill --repo owner/name    # the history
+relored authority --repo owner/name   # who had write access
+relored clone     --repo owner/name   # the working clone the code verbs read
+```
+
+`relored` owns the database; `relore` is a thin client and never touches it, so
+the index goes behind an HTTP API and the client points at it:
+
+```bash
+relored serve --port 8080             # in another terminal
+export RELORE_API=http://localhost:8080
 
 relore search "why is this cast here" --kind rationale --file src/model.py
-relore why src/model.py:42   # blame → the pull request → what reviewers said there
+relore why src/model.py:42            # blame → the pull request → what reviewers said there
 ```
+
+Without `RELORE_API` the client talks to our own deployment, which is not
+reachable from outside our network — so set it, or `relore status` is the first
+thing that will tell you.
 
 A full history is resumable and takes about a day; `relored sample --repo
 owner/name --since YYYY-MM-DD` indexes a window in minutes if you want to try it
-on something smaller first. Skip the `clone` step and the history verbs still
-work; the code verbs — `grep`, `symbol`, `copies`, `defs`/`refs` and `why` —
-answer `503` with a sentence naming that command, and nothing else degrades.
-`relored serve` then puts the index behind an HTTP API, which is how agents
-reach it, and `relore --help` is the reference.
+on something smaller first. The clone is optional for the history verbs and
+required for the code side: without it `grep`, `symbol`, `copies`, `defs`/`refs`
+and `why` answer `503` with a sentence naming that command, and nothing else
+degrades. `relore --help` is the reference.
 
 The code is at [huggingface/relore](https://github.com/huggingface/relore).
 Issues and pull requests are welcome.
