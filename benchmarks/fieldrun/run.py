@@ -80,6 +80,10 @@ from typing import Any
 import httpx
 
 ROUTER = "https://router.huggingface.co/v1/chat/completions"
+#: Status codes worth asking again for, and how many times. A shared endpoint's overload is
+#: not a property of the build under test.
+RETRY_ON = frozenset({429, 500, 502, 503, 504, 529})
+RETRIES = 4
 HERE = Path(__file__).resolve().parent
 
 #: Read-only, and an allowlist rather than a denylist: this harness hands a model a
@@ -377,12 +381,26 @@ def run_task(
             **({} if spent else {"tools": tools}),
         }
         t0 = time.perf_counter()
-        try:
-            response = client.post(
-                ROUTER, headers={"Authorization": f"Bearer {token}"}, json=body, timeout=300
-            )
-        except httpx.HTTPError as exc:
-            run.error, run.stopped = f"{type(exc).__name__}: {exc}", "transport"
+        # A shared endpoint says 429 and 529 for reasons that have nothing to do with the
+        # run, and a sweep that discards an arm over one of them reports a comparison it
+        # did not make: `rationale:fp8-experts` came back empty on both arms of the first
+        # real sweep, one of them for a 529 alone.
+        for attempt in range(RETRIES):
+            try:
+                response = client.post(
+                    ROUTER, headers={"Authorization": f"Bearer {token}"}, json=body, timeout=300
+                )
+            except httpx.HTTPError as exc:
+                run.error, run.stopped = f"{type(exc).__name__}: {exc}", "transport"
+                response = None
+            else:
+                run.error = ""
+                if response.status_code == 200 or response.status_code not in RETRY_ON:
+                    break
+                run.error = f"HTTP {response.status_code}: {response.text[:400]}"
+            if attempt < RETRIES - 1:
+                time.sleep(2**attempt)
+        if response is None:
             break
         if response.status_code != 200:
             run.error = f"HTTP {response.status_code}: {response.text[:400]}"
@@ -407,6 +425,18 @@ def run_task(
 
         message = payload["choices"][0]["message"]
         tool_calls = message.get("tool_calls") or []
+        # **Echoed back repaired, not verbatim.** A model that emits unparseable tool-call
+        # arguments is a thing that happens; re-sending them in the transcript made the
+        # *router* reject the next request with `400 Invalid JSON in tool call arguments`,
+        # which killed two arms of the first real sweep several calls after the mistake and
+        # reported it as a run that could not answer. The run should absorb a malformed
+        # call the way it absorbs a refused one -- tell the model, carry on.
+        for call in tool_calls:
+            function = call.get("function") or {}
+            try:
+                json.loads(function.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                function["arguments"] = "{}"
         messages.append(
             {
                 "role": "assistant",
@@ -425,7 +455,12 @@ def run_task(
                 args = json.loads(tool_call["function"]["arguments"] or "{}").get("args") or []
                 args = [str(a) for a in args]
             except json.JSONDecodeError:
-                args, out, code, refused = [], "arguments were not valid JSON", 2, True
+                args = []
+                out = (
+                    "your arguments were not valid JSON and were discarded; "
+                    'pass them as {"args": ["verb", "..."]}'
+                )
+                code, refused = 2, True
             else:
                 refused = False
                 t1 = time.perf_counter()
@@ -523,6 +558,13 @@ def summarize(run: Run) -> dict[str, Any]:
         "completion_tokens": sum(r.completion_tokens for r in run.requests),
         "cached_tokens": sum(r.cached_tokens for r in run.requests),
         "time_to_evidence": evidence_at,
+        # **Cited, but never seen.** The answer names the thread the evaluation set judged
+        # as the answer, and no tool result on this run ever contained it -- so the model
+        # is quoting its weights, not the corpus, and the `answered` column is measuring
+        # recall of the training data. It is not automatically wrong (an agent may know a
+        # famous issue) and it is never evidence about retrieval, which is what this
+        # harness exists to compare. Flagged rather than scored either way.
+        "cited_unseen": bool(run.answered and evidence_at is None),
         "calls_after_evidence": None if evidence_at is None else len(run.calls) - evidence_at - 1,
         # Brevity.
         "tool_chars_total": sum(chars),
@@ -543,6 +585,7 @@ def summarize(run: Run) -> dict[str, Any]:
 def report(rows: list[dict[str, Any]], runs: list[Run]) -> str:
     """The table, and the sentence that keeps it honest."""
     keys = [
+        "cited_unseen",
         "calls",
         "turns",
         "prompt_tokens_billed",
