@@ -338,19 +338,43 @@ def run_task(
     seen_lines: set[str] = set()
     started = time.perf_counter()
 
-    while len(run.calls) <= max_calls:
-        # A budget on the *run*, not only on each call. One sweep spent 50 minutes inside
-        # one task because a model kept asking for more; a harness that cannot be left
-        # alone is one nobody leaves alone, and a hung arm silently costs the comparison
-        # its other half.
+    spent = False
+    while True:
+        # A budget on the *run*, not only on each call. A harness that cannot be left alone
+        # is one nobody leaves alone, and a hung arm silently costs the comparison its
+        # other half.
         if time.perf_counter() - started > run_timeout:
             run.stopped = "run_timeout"
             break
+        # **The call budget ends the run, and the last request is asked with no tools.**
+        # Getting this wrong is measurable and was: the loop ran while `calls <= max_calls`
+        # and the inner loop refused to execute at the cap, so the model was re-asked
+        # forever with its tool calls unanswered -- 340 requests and 3.7M prompt tokens for
+        # 20 calls, ended only by the wall clock. And a run that spends its budget should
+        # still be *scored*: taking the tools away and asking once more is what a real
+        # harness does, and it is the difference between "could not answer" and "was cut
+        # off mid-search", which are not the same result.
+        if len(run.calls) >= max_calls and spent:
+            run.stopped = "max_calls"
+            break
+        spent = len(run.calls) >= max_calls
+        if spent:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"You have used your budget of {max_calls} tool calls. Answer now "
+                        "with what you have, in at most six sentences, naming the issue or "
+                        "pull request number you rely on — or say plainly that you could "
+                        "not find it."
+                    ),
+                }
+            )
         body: dict[str, Any] = {
             "model": f"{model}:{provider}" if provider else model,
             "messages": messages,
-            "tools": tools,
             "temperature": temperature,
+            **({} if spent else {"tools": tools}),
         }
         t0 = time.perf_counter()
         try:
@@ -396,9 +420,6 @@ def run_task(
             break
 
         for tool_call in tool_calls:
-            if len(run.calls) >= max_calls:
-                run.stopped = "max_calls"
-                break
             name = tool_call["function"]["name"]
             try:
                 args = json.loads(tool_call["function"]["arguments"] or "{}").get("args") or []
