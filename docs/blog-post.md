@@ -5,11 +5,14 @@ On 8 September somebody opened
 Transformers: `GPTNeoXJapanese` crashes for any `rotary_pct != 1.0`, because
 RoPE ignores `partial_rotary_factor`. Within a day a contributor had posted a
 correct diagnosis, a maintainer had answered "a PR is very much welcome", and
-two different people had each opened a fix. 
-Two days later Serge, our agent, picked up the same issue and started 
-writing a third patch without knowing there were already two. This happened 
-because `gh issue view` did not link all those events together and 
-it's easy to miss.
+
+Within two days, two different people had opened fixes. When Serge picked up
+the issue, it was about to write another patch without realizing that work was
+already in flight.
+
+All of this information existed on GitHub, but it was spread across separate
+issues, PRs, and comments. Looking at the issue alone did not reveal the work
+already in flight.
 
 `gh` can fetch any individual issue, PR, or comment. The hard part is knowing
 which ones to fetch: the fix may live in another PR, the rationale in a review
@@ -60,10 +63,11 @@ $ relore inflight 48630
    > fix: respect partial_rotary_factor in GPTNeoXJapaneseRotaryEmbedding
 ```
 
-That's usually the first verb the agent will call because we've hinted it in `--help`.
+We put `inflight` early in --help because it is usually the question an agent
+should answer first.
 
 Once the agent gets the overview of the situation, it digs into the discussions
-with `threads` where there is a clear distinction between contributor, bots and maintainers, 
+with `thread` where there is a clear distinction between contributor, bots and maintainers,
 then does a couple of `search` calls and looks at the code via `copies` and/or `defs`.
 
 An agent in one of our field tests reported that
@@ -83,10 +87,8 @@ regression across models.
 
 ## One run, end to end
 
-Another real-world example: the [field
-report](https://github.com/huggingface/relore/issues/8) for the bug this post
-opened with is the whole trace. A cold agent, with no documentation beyond
-`relore --help`:
+The [field report](https://github.com/huggingface/relore/issues/8) for our earlier bug shows
+the complete flow:
 
 - read the issue and separated the maintainer's comment from the contributor's,
   which is what reframed the task;
@@ -98,10 +100,11 @@ opened with is the whole trace. A cold agent, with no documentation beyond
 - found the refactor that caused the regression;
 - then moved to code inspection for the repo-wide audit the maintainer asked for.
 
-Every query was served locally by `relore`. GitHub is contacted only by the
+Every `relore` query was served locally by `relore`. GitHub is contacted only by the
 ingestion process, to keep the index fresh.
 
-That last step is what `why` makes direct:
+One query the agent explicitly wanted during that run was: why does this line
+exist? That is what `why` now makes direct.
 
 ```console
 relore why src/.../modeling_gpt_neox_japanese.py:90
