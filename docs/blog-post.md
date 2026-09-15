@@ -37,6 +37,11 @@ it, both served over one HTTP API.
 *History on one side, the code as it is today on the other, and one tool that
 can answer across both.*
 
+`relore` comes with a lot of `verbs` that can be used to search discussions threads, 
+code symbols, or why a given line is written like this.
+
+Check out the full list at https://github.com/huggingface/relore/blob/main/docs/cli.md
+
 For the specific case we presented earlier, a call to `inflight` directly hints
 that there are competing patches for that issue, and that one was closed:
 
@@ -50,29 +55,21 @@ $ relore inflight 48630
    > fix: respect partial_rotary_factor in GPTNeoXJapaneseRotaryEmbedding
 ```
 
-`relore` comes with a lot of `verbs` that can be used to search discussions threads, 
-code symbols, or why a given line is written like this.
-
-A typical session looks like this:
+That's usually the first verb the agent will call because we've hinted it in `--help`.
+From there, a typical agent session can look like this:
 
 ```
-relore inflight 47720 
+relore inflight 47720
+relore thread 47720 --outline 
 relore why src/model.py:90 
-relore search "AttributeError: 'NoneType' object has no attribute 'shape'" --kind failure
 relore search "why is this cast here" --kind rationale --file src/model.py
 relore search --symbol GemmaRotaryEmbedding  
 relore copies compute_default_rope_parameters
 ```
 
-`copies` returns all occurences of a symbole and there's also `defs` that 
-returns a module symbols:
-
-```
-$ relore defs relore/ingest/authority.py
-43-56        class     AuthorityResult
-59-117       function  resolve_authority
-120-156      function  _resolve_one
-```
+The agents gets the overview of the situation, then digs into the discussion, 
+where there is a clear distinction between contributor, bots and maintainers, 
+then do a couple of searchs and look at the code via `copies` and/or `defs`.
 
 An agent in one of our field tests reported that
 `relore defs` gave it a better overview of a file than reading the whole thing,
@@ -89,9 +86,10 @@ in years of GitHub discussions.
 
 ## One run, end to end
 
-The [field report](https://github.com/huggingface/relore/issues/8) for the bug
-this post opened with is the whole trace. A cold agent, with no documentation
-beyond `relore --help`:
+Another real world example: the [field
+report](https://github.com/huggingface/relore/issues/8) for the bug this post
+opened with is the whole trace. A cold agent, with no documentation beyond
+`relore --help`:
 
 - read the issue and separated the maintainer's comment from the contributor's,
   which is what reframed the task;
