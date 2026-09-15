@@ -40,9 +40,24 @@ models, so would be really cool if you can check all models and revert
 
 Two comments. A diagnosis and a "yes please" — and a third person, in the first
 one, offering to write the patch as well. Not one of them mentions that two
-already exist. Both pull requests say `Fixes #48630` in their bodies, so GitHub
-does know; it records that as a cross-reference in the issue's *timeline*, which
-is not something an agent reading the thread ever sees.
+already exist.
+
+Both pull requests say `Fixes #48630` in their bodies, so GitHub does know, and
+`gh` will tell you — if you already suspect, and know where to ask:
+
+```console
+$ gh issue view 48630 --repo huggingface/transformers --json closedByPullRequestsReferences
+{"closedByPullRequestsReferences":[{"number":48652, …}]}
+```
+
+One of the two. Not #48672 — that one is closed and unmerged, so it no longer
+counts as something that *will* close the issue, even though it is the single
+clearest piece of evidence that this issue attracts duplicate work. `gh search
+prs 48630` does find both, as a text match rather than as the `Fixes` edge.
+
+So the answer is obtainable. It is just not on the page anybody read, and
+getting it means holding the suspicion first and then knowing a JSON field name
+or a search to run.
 
 One call answers it:
 
@@ -56,9 +71,14 @@ $ relore inflight 48630
    > fix: respect partial_rotary_factor in GPTNeoXJapaneseRotaryEmbedding
 ```
 
-Two people had already written this patch. One of them threw his away. The
-question "is somebody already fixing this?" had an answer the whole time, and
-it was one join away from the issue the agent was reading.
+Two people had already written this patch. One of them threw his away, and that
+one is the interesting row: an abandoned duplicate is what duplicated work
+looks like after the fact, and it is exactly what GitHub's own "what closes
+this" field drops.
+
+That is the difference a verb makes. Not that the answer was unobtainable —
+that "is somebody already fixing this?" is one question with one answer, asked
+before the work starts, rather than a suspicion you have to have first.
 
 The maintainer's comment on that thread is worth more than either fix:
 
