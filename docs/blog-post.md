@@ -59,7 +59,7 @@ That's usually the first verb the agent will call because we've hinted it in `--
 
 Once the agent gets the overview of the situation, it digs into the discussions
 with `threads` where there is a clear distinction between contributor, bots and maintainers, 
-then does a couple of `search` calls and look at the code via `copies` and/or `defs`.
+then does a couple of `search` calls and looks at the code via `copies` and/or `defs`.
 
 An agent in one of our field tests reported that
 `relore defs` gave it a better overview of a file than reading the whole thing.
@@ -67,16 +67,15 @@ An agent in one of our field tests reported that
 In that run, asking for the structure first and reading only what mattered was
 more than an order of magnitude cheaper.
 
-See [field report](https://github.com/huggingface/relore/issues/8) it filed at the end of the run. 
+See the [field report](https://github.com/huggingface/relore/issues/8) it filed at the end of the run. 
 
 `grep` and `rg` return matching lines and leave the model to
 reconstruct the program structure around them. Asking for the structure first,
-then reading only what matters, is an order of magnitude cheaper.
+then reading only what matters,
 
-Provenance and trust were also a game changer during that field test: it changed 
-the interpretation of the task from fixing one model to auditing a regression across models.
-
-
+Provenance mattered just as much: distinguishing maintainer guidance from
+contributor claims changed the task from fixing one model to auditing the
+regression across models.
 
 ## One run, end to end
 
@@ -95,7 +94,7 @@ opened with is the whole trace. A cold agent, with no documentation beyond
 - found the refactor that caused the regression;
 - then moved to code inspection for the repo-wide audit the maintainer asked for.
 
-Every query was served locally from `relore`. GitHub is contacted only by the
+Every query was served locally by `relore`. GitHub is contacted only by the
 ingestion process, to keep the index fresh.
 
 That last step is what `why` makes direct:
