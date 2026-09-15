@@ -38,12 +38,12 @@ models, so would be really cool if you can check all models and revert
 --
 ```
 
-Two comments. A diagnosis and a "yes please" — and a third person, in the first
-one, offering to write the patch as well. Not one of them mentions that two
-already exist.
+A diagnosis, a "yes please", and — in the first comment — a third person
+offering to write the patch as well. Not one of them mentions that two already
+exist.
 
 Both pull requests say `Fixes #48630` in their bodies, so GitHub does know, and
-`gh` will tell you — if you already suspect, and know where to ask:
+`gh` will tell you, if you already suspect and know where to ask:
 
 ```console
 $ gh issue view 48630 --repo huggingface/transformers --json closedByPullRequestsReferences
@@ -52,16 +52,11 @@ $ gh issue view 48630 --repo huggingface/transformers --json closedByPullRequest
 
 One of the two. Not #48672 — that one is closed and unmerged, so it no longer
 counts as something that *will* close the issue, even though it is the single
-clearest piece of evidence that this issue attracts duplicate work. `gh search
-prs 48630` does find both, as a text match rather than as the `Fixes` edge.
-
-So the answer is obtainable. It is just not on the page anybody read, and
-getting it means holding the suspicion first and then knowing a JSON field name
-or a search to run.
+clearest piece of evidence that this issue attracts duplicate work.
 
 `relore` is what we built so that this question has an answer rather than a
 prerequisite — an index of a repository's own history, described properly
-further down. For now, one verb of it:
+below. For now, one verb of it:
 
 ```console
 $ relore inflight 48630
@@ -73,126 +68,85 @@ $ relore inflight 48630
    > fix: respect partial_rotary_factor in GPTNeoXJapaneseRotaryEmbedding
 ```
 
-Two people had already written this patch. One of them threw his away, and that
-one is the interesting row: an abandoned duplicate is what duplicated work
-looks like after the fact, and it is exactly what GitHub's own "what closes
-this" field drops.
+**"Is somebody already fixing this?" is one question with one answer, asked
+before the work starts** — not a suspicion you have to hold first.
 
-That is the difference a verb makes. Not that the answer was unobtainable —
-that "is somebody already fixing this?" is one question with one answer, asked
-before the work starts, rather than a suspicion you have to have first.
+## Three questions
 
-The maintainer's comment on that thread is worth more than either fix:
+That is the first of three, and they come in the order an agent hits them.
 
-> it had a few regressions under the linked PR and some of them were fixed by
-> Cyril recently. I suppose we still missed a few models, so would be really
-> cool if you can check all models and revert `partial_rotation` where it got
-> deleted
+**1. Is somebody already doing this?** Above. The most expensive thing an agent
+does is patch something that is already in review.
 
-The task was never "fix this model". It was "a refactor broke several models,
-some are already repaired, find the rest." No amount of reading
-`modeling_gpt_neox_japanese.py` tells you that. The agent's own
-[field report](https://github.com/huggingface/relore/issues/8) calls it the
-highest-value output of the session.
+**2. Why is it like this?** Why a fallback cannot be removed, which approach was
+tried and rejected, what a maintainer made the last five contributors change.
+Look again at the maintainer's reply on that issue: *"it had a few regressions
+under the linked PR… I suppose we still missed a few models, so would be really
+cool if you can check all models."* The task was never "fix this model". It was
+"a refactor broke several, some are already repaired, find the rest." A checkout
+contains the current state of a project. It does not contain the project's
+memory, and no amount of reading `modeling_gpt_neox_japanese.py` recovers that
+sentence.
 
-That is the shape of the problem. The other half is what it costs. A few weeks
-ago Serge, one of the agents we use to maintain Transformers, spent 2.1 million
-input tokens on a single problem and produced no fix. It made 153 tool calls;
-137 of them re-opened a file it had already opened — `modular_blt.py` 53 times,
-a different slice of it each time. Those numbers are from our own job store,
-for one run of the nightly integration-failure triage. The calls themselves are
-cheap. What is expensive is the turn around each one, because every turn
-re-sends the whole conversation.
+**3. Is that still true?** A three-year-old review is a claim about code that has
+moved since. Threads tell you what people decided; running `grep` and `symbol`
+against the repository at HEAD tells you whether it is still true — and a
+contributor's claim confirmed against the code is stronger evidence than either
+alone.
 
-Neither agent was doing anything obviously wrong. Transformers is a very large
-codebase, reading it one file at a time is expensive — and the things it does
-not contain are not in it at any price.
+Agents waste work in two ways: **re-reading what is in the repository, and
+rediscovering what is not.** The story above is the second. The first is
+cruder and we measured it on ourselves: one run of our nightly triage agent
+spent 2.1 million input tokens and produced no fix, across 153 tool calls of
+which 137 re-opened a file it had already opened — `modular_blt.py` 53 times, a
+different slice each time. The calls are cheap; the turn around each one is not,
+because every turn re-sends the whole conversation.
 
-## Browsing the code
+Those two failures want different fixes, and only the second is what this post
+is about. Re-reading is working memory inside one session; an index of project
+history does not touch it, and we would be selling you something if we implied
+otherwise. What an index changes is the other half: the questions that are not
+answerable from the repository at any price.
 
-`grep` and `rg` are great tools, and coding agents use them constantly to find relevant snippets 
-in large codebases. But they return matching lines without much structure or prioritization. 
-The LLM still has to reconstruct the surrounding program structure from those results.
+## What relore is
 
-You can reduce the cost by pruning or compressing those interactions, 
-but it is still a text-based workflow that leaves extra work to the model.
-
-Tools like `ctags` and `tree-sitter` solve this by providing a searchable symbols 
-index, and you can find numerous projects out there that will do exactly 
-that and surface it in a CLI for your agent.
-
-So we first added structural code navigation of our own and exposed it through
-a new tool: `relore`.
-
-In one of our field tests, the agent reported that `relore defs` gave it a
-better overview of a file than reading the whole thing, for roughly 5% of the
-tokens — its own words, in the
-[field report](https://github.com/huggingface/relore/issues/8) it filed at the
-end of the run.
-
-Instead of loading the implementation, the agent can first ask for its structure:
-
-```
-relore defs path/to/model.py
-```
-
-and only read the parts it actually needs.
-
-But after optimizing code browsing, we ran into a harder problem: sometimes the
-information Serge needs isn't in the code at all.
-
-
-## Understanding decisions
-
-Another problem we ran into is that a checkout contains the current state of a
-project. It doesn't contain the project's memory.
-
-So a PR that seems correct may be rejected by a contributor with a reference
-to an old attempt on another closed PR or a link to the right solution explained 
-in another buried comment.
-
-Or worse: your agent burns tokens while a fix is already there waiting for review.
-
-Questions we want answers to:
-
-- Is somebody already fixing this?
-- Was this approach tried before?
-- Why is this line written this way?
-- How have maintainers fixed this class of failure in the past?
-- What did maintainers explicitly reject?
-- Is an old decision still true in the current code?
-
-This is the project's "lore." There have been
-[proposals](https://arxiv.org/abs/2603.15566) to make this kind of context
-explicit and structured in git history. Our starting point is different:
-projects don't need to change how they work. Much of that knowledge already
-exists—it's just trapped in years of GitHub discussions.
-
-GitHub Search is often the right tool for one-off human lookups—fresh, authoritative, 
-cross-repo—and falls down specifically as a high-throughput agent retrieval layer:
-
-- it exposes a best-match ranking, but it is opaque and isn't designed around
-the kinds of evidence our agents care about.
-- it's rate limited and our swarm of agents can quickly hit the cap
-- it can find text inside comments, but the result is the containing thread.
-The agent then has to fetch and reread that thread to discover which comment
-matched, who wrote it, and when.
-
-
-## Meet Relore: repository memory
-
-`relore` (REpository LORE) is a searchable memory for a GitHub repository.
-
-It indexes issues, PRs, comments, reviews, commit messages and the
-relationships between them. Alongside that history it keeps a working clone of
-the repository, so an agent can move between “what did people say?” and “what
-does the code look like now?” without loading either world wholesale into its
-context.
+`relore` (REpository LORE) indexes a repository's complete issue and
+pull-request history — issues, PRs, comments, reviews, commit messages and the
+relationships between them — and keeps a working clone of the repository beside
+it, both served over one HTTP API.
 
 ![Relore sits between a repository's history and its current code, and answers an agent's questions against both.](relore-diag.png)
 
 *History on one side, the code as it is today on the other, and one tool that
 can answer across both.*
+
+Three properties do the work, and none of them is "search":
+
+**Retrieval is at comment level.** GitHub Search can find text inside a comment,
+but what it returns is the containing thread; the agent then fetches and rereads
+that thread to discover which comment matched, who wrote it and when. `relore`
+returns the comment, with its author and its standing attached.
+
+**Relationships are first-class.** `Fixes #N` is an edge, not a string, which is
+what makes `inflight` a lookup rather than a search.
+
+**The code is there too**, at HEAD, server-side, with no checkout on your side —
+so "was that still true?" is one more call rather than a clone.
+
+The code side came first, and it is worth its own line: an agent in one of our
+field tests reported that `relore defs` gave it a better overview of a file than
+reading the whole thing, for roughly 5% of the tokens — its own words, in the
+[field report](https://github.com/huggingface/relore/issues/8) it filed at the
+end of the run. `grep` and `rg` return matching lines and leave the model to
+reconstruct the program structure around them; asking for the structure first
+and then reading only what matters is cheaper by an order of magnitude.
+
+There have been [proposals](https://arxiv.org/abs/2603.15566) to make decision
+context explicit and structured in git history. Our starting point is different:
+projects should not have to change how they work. The knowledge already exists —
+it is just trapped in years of GitHub discussions.
+
+## Provenance, and why it is hard
 
 Not every piece of project history is equally authoritative. A maintainer
 explaining why an approach was rejected is different from a contributor
@@ -200,130 +154,114 @@ speculating about a bug, or a bot posting generated text — and the difference 
 four tokens in front of a snippet.
 
 Back on the GPTNeoXJapanese bug. The reporter's own body says *"this is a
-regression from #39847"* — but that is a contributor's attribution, and acting
-on it means rewriting a model. Asked plainly, confirming it puts the answer on
-the page without putting it first:
+regression from #39847"* — a contributor's attribution, and acting on it means
+rewriting a model. Confirming it puts the answer on the page without putting it
+first:
 
 ```console
 $ relore search "standardize rope partial_rotary_factor refactor all models"
 1. #43020  [contributor claim]   7mo  Add mimo v2 flash
 2. #46121  [contributor claim]   3mo  `convert_rope_params_to_dict` raises `TypeError` …
 3. #39847  [authoritative]      13mo  🚨 [v5] Refactor RoPE for layer types
-```
+4. #48241  [contributor claim]  22d   MiniMaxM2 silently applies full-head RoPE …
 
-One flag:
-
-```console
-$ relore search "standardize rope partial_rotary_factor refactor all models" --trust authoritative
+$ relore search "…" --trust authoritative
 1. #39847  [authoritative]  13mo  🚨 [v5] Refactor RoPE for layer types   @zucchini-nlp
 ```
 
 The attribution is confirmed from the side that decides: authored by the same
-maintainer who answered the issue, and carrying the 🚨 that marks a deliberate
-breaking change. A contributor's claim and an authoritative thread agreeing is
-stronger than either alone, and it took one flag rather than a diff.
+maintainer who answered the issue, carrying the 🚨 that marks a deliberate
+breaking change.
 
-**The flag is also the wrong one to reach for next, which is the part worth
-internalising.** The maintainer's real ask was *"check all models"*, and one of
-the models is in that first page — `#48241, MiniMaxM2 silently applies full-head
-RoPE`, a contributor's bug report. Raise the floor and it disappears, because
-"I hit this error" is a report and reports come from anyone. The tiers are not a
-quality ranking. Reports and judgements are different things, and the floor is
-for the second.
+**And the same flag is the wrong one to reach for next.** The maintainer's real
+ask was "check all models" — and one of those models is result 4, `MiniMaxM2
+silently applies full-head RoPE`, a contributor's bug report. Raise the floor and
+it disappears, because "I hit this error" is a report, and reports come from
+anyone. **Trust is provenance, not quality.** Reports and judgements are
+different things; the floor is for the second.
 
-**The tier is not our judgement, which is the point and also the limit.** It
-comes from GitHub's own `author_association`, narrowed against write access — and
-that association is not a fact about the comment, it is computed when you ask.
-So when a maintainer leaves the organisation, everything they ever wrote quietly
-becomes a contributor claim.
+Provenance also has to be **time-aware**, and ours is not yet. The tier comes
+from GitHub's `author_association`, which is not a fact about the comment — it is
+computed when you ask. So when a maintainer leaves the organisation, everything
+they ever wrote quietly becomes a contributor claim. On
+[#28056](https://github.com/huggingface/transformers/issues/28056), a 34-comment
+argument about `use_cache`, the comment that settles the design is @gante's,
+written while he maintained that part of the library; GitHub now returns
+`CONTRIBUTOR` for it, and for his comments going back to 2023. Raising the floor
+hides the answer.
 
-On [#28056](https://github.com/huggingface/transformers/issues/28056) — a
-34-comment argument about `use_cache` and gradient checkpointing — the comment
-that settles the design is @gante's, written while he maintained that part of
-the library. He has since moved on, so GitHub now returns `CONTRIBUTOR` for it,
-and for his comments going back to 2023. Raising the floor hides the answer.
+We are fixing it ([#74](https://github.com/huggingface/relore/issues/74)):
+merging a pull request *is* the write act and it is dated, so who held the keys
+and when is derivable from the history the index already holds. It is a fair
+example of what this project keeps running into — provenance is the most useful
+thing in the index and the easiest thing to get silently wrong, and the failure
+is never an error message. It is a page that looks complete.
 
-We are fixing it
-([#74](https://github.com/huggingface/relore/issues/74)): merging a pull request
-*is* the write act and it is dated, so who held the keys and when is derivable
-from the history the index already holds — no API call, and no trusting the
-present tense about the past. It is a good example of what this whole project
-keeps running into. Provenance is the most useful thing in the index and the
-easiest thing to get subtly, silently wrong, and the failure is never an error
-message: it is a page that looks complete.
-
-Until then, the tier is a lens rather than a gate. Every page labels both tiers
-and hides neither, and raising the floor is something to do when the question is
-specifically "what did the people who decide think" — remembering that it is
-GitHub's answer to who those people are today, not ours, and not the repository's
-answer at the time.
+## One run, end to end
 
 The [field report](https://github.com/huggingface/relore/issues/8) for the bug
 this post opened with is the whole trace. A cold agent, with no documentation
 beyond `relore --help`:
 
-- read the issue and immediately separated the maintainer's comment from the
-  contributor's, which is what reframed the task;
+- read the issue and separated the maintainer's comment from the contributor's,
+  which is what reframed the task;
 - learned the bug was one of several a refactor had regressed;
-- searched `partial_rotary_factor` across history, which is how it found the
-  open fix — crossing thread boundaries, because the fix was not in the thread.
+- searched `partial_rotary_factor` across history, which is how it found the open
+  fix — crossing thread boundaries, because the fix was not in the thread.
   `relore inflight` exists because of that call: it was a lucky side effect of a
   symbol search, and an agent's most expensive failure mode deserves a verb;
-- found the refactor that caused the regression, with the flag above;
+- found the refactor that caused the regression;
 - then moved to code inspection for the repo-wide audit the maintainer asked for.
 
-During that investigation, every query was served from the local Relore
-index—no GitHub API calls were made. GitHub is contacted by the ingestion
-process to keep the PostgreSQL index fresh, not by every agent doing a search.
+Every query was served from the local index. GitHub is contacted by the ingestion
+process to keep it fresh, not by every agent doing a search.
 
-relore can make this connection more direct:
+That last step is what `why` makes direct:
 
-```
+```console
 relore why src/.../modeling_gpt_neox_japanese.py:90
 ```
 
-`git blame` can tell you which commit last changed a line. `relore why` follows that commit back to the 
-pull request and surfaces the review comments around that line, the discussion 
-that can explain why the change was made.
-
-It connects the code that exists today back to the discussion that shaped it.
+`git blame` tells you which commit last changed a line. `relore why` follows that
+commit to its pull request and surfaces the review comments around that line —
+the discussion that explains why the change was made.
 
 ## What that changes
 
-The triage run above made 153 tool calls, 137 of them back into a file it had
-already opened, and produced no fix. It also had no way to ask about any of the
-history in that list: the agent's entire toolset was `grep`, `read_file`,
-`list_dir` and `fetch_url`, so "is somebody already fixing this?" was not a
-question it could ask, at any budget.
+The triage run at the top made 153 tool calls, 137 of them back into a file it
+had already opened, and produced no fix. It also had no way to ask any of the
+three questions above: its entire toolset was `grep`, `read_file`, `list_dir`
+and `fetch_url`, so "is somebody already fixing this?" was not a question it
+could ask, at any budget.
 
 The field-report run reached the root cause, the culprit PR and the already-open
 fix in about ten calls. A [later run](https://github.com/huggingface/relore/issues/58)
 on a bug it had never seen found the in-flight PR on its third call and came back
 with two findings that neither the issue nor that PR contained, without cloning
 the repository at all. Everything relore handed that session came to 25,767
-tokens — a median of 306 tokens per call, and less in total than three reads of
-the one file the triage job opened 53 times.
+tokens — a median of 306 per call, and less in total than three reads of the one
+file the triage job opened 53 times.
 
-Those are different bugs in different harnesses, so this is a change of shape
-rather than a controlled benchmark — and we are deliberately not putting a
-number opposite the 2.1M, because the total bill of an agent session is set by
-its harness and its turn count far more than by any one tool. The shape is the
-point: the questions that used to cost a hundred file visits, or that the agent
-simply could not ask, now cost a few hundred tokens each.
+Those are different bugs in different harnesses. It is a change of shape, not a
+controlled benchmark, and we are deliberately not putting a number opposite the
+2.1M: the total bill of an agent session is set by its harness and its turn count
+far more than by any one tool. The shape is the point — questions that used to
+cost a hundred file visits, or that the agent simply could not ask, now cost a
+few hundred tokens each.
 
 ## Conclusion
 
-We built `relore` because Serge needed a better way to remember Transformers. But
-there isn't anything Transformers-specific about the problem.
+We built `relore` because our agents needed a better way to remember
+Transformers. But there is nothing Transformers-specific about the problem.
 
-Mature open-source projects accumulate years of decisions in issues, reviews
-and PR comments. Humans learn that lore slowly. Agents start every session
-knowing none of it.
+Mature open-source projects accumulate years of decisions in issues, reviews and
+PR comments. Humans learn that lore slowly. Agents start every session knowing
+none of it.
 
 `relore` turns that history into something both can query, and connects it back
 to the code that exists today.
 
-It's open source, Apache 2.0, and works on any GitHub repository you're willing
+It is open source, Apache 2.0, and works on any GitHub repository you are willing
 to index.
 
 ## Try it
@@ -334,15 +272,19 @@ pip install "relore[postgres] @ git+https://github.com/huggingface/relore"
 export RELORE_DATABASE_URL=postgresql://localhost/relore
 export GITHUB_TOKEN=...   # issues:read + pull_requests:read, never write
 
-relored migrate && relored backfill --repo owner/name && relored authority --repo owner/name
+relored migrate
+relored backfill --repo owner/name && relored authority --repo owner/name
+relored clone    --repo owner/name    # the working clone the code verbs read
+
 relore search "why is this cast here" --kind rationale --file src/model.py
 ```
 
 A full history is resumable and takes about a day; `relored sample --repo
 owner/name --since YYYY-MM-DD` indexes a window in minutes if you want to try it
-on something smaller first. `relored serve` then puts the index behind an HTTP
-API, which is how agents reach it, and `relore --help` is the reference.
+on something smaller first. Skip the `clone` step and the history verbs still
+work; the code verbs — `grep`, `symbol`, `copies`, `defs`/`refs` and `why` —
+answer `503` with a sentence naming that command, and nothing else degrades. `relored serve` then puts the index behind an HTTP API, which is
+how agents reach it, and `relore --help` is the reference.
 
 The code is at [huggingface/relore](https://github.com/huggingface/relore).
 Issues and pull requests are welcome.
-
