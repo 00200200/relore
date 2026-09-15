@@ -12,7 +12,7 @@ because `gh issue view` did not link all those events together and
 it's easy to miss.
 
 The `gh` client can be used to investigate through all PR and issues comments, 
-but suffers from  some limitation where the important data cam be 
+but has some limitations where the important data can be 
 missed or hard to recollect. 
 
 `relore` is what we built to improve this, an index of a repository's own
@@ -38,8 +38,7 @@ it, both served over one HTTP API.
 *History on one side, the code as it is today on the other, and one tool that
 can answer across both.*
 
-`relore` comes with a lot of `verbs` that can be used to search discussions threads, 
-code symbols, or why a given line is written like this.
+`relore` exposes `verbs` for querying discussion history, inspecting code, and recovering why a particular line exists.
 
 Check out the full list at https://github.com/huggingface/relore/blob/main/docs/cli.md
 
@@ -58,15 +57,19 @@ $ relore inflight 48630
 
 That's usually the first verb the agent will call because we've hinted it in `--help`.
 
-Once the agents gets the overview of the situation, it digs into the discussions
+Once the agent gets the overview of the situation, it digs into the discussions
 with `threads` where there is a clear distinction between contributor, bots and maintainers, 
-then do a couple of `search` calls and look at the code via `copies` and/or `defs`.
+then does a couple of `search` calls and look at the code via `copies` and/or `defs`.
 
 An agent in one of our field tests reported that
-`relore defs` gave it a better overview of a file than reading the whole thing,
-**for roughly 5% of the tokens in this run**  see
-[field report](https://github.com/huggingface/relore/issues/8) it filed at the
-end of the run. `grep` and `rg` return matching lines and leave the model to
+`relore defs` gave it a better overview of a file than reading the whole thing.
+
+In that run, asking for the structure first and reading only what mattered was
+more than an order of magnitude cheaper.
+
+See [field report](https://github.com/huggingface/relore/issues/8) it filed at the end of the run. 
+
+`grep` and `rg` return matching lines and leave the model to
 reconstruct the program structure around them. Asking for the structure first,
 then reading only what matters, is an order of magnitude cheaper.
 
@@ -77,7 +80,7 @@ the interpretation of the task from fixing one model to auditing a regression ac
 
 ## One run, end to end
 
-Another real world example: the [field
+Another real-world example: the [field
 report](https://github.com/huggingface/relore/issues/8) for the bug this post
 opened with is the whole trace. A cold agent, with no documentation beyond
 `relore --help`:
@@ -92,7 +95,7 @@ opened with is the whole trace. A cold agent, with no documentation beyond
 - found the refactor that caused the regression;
 - then moved to code inspection for the repo-wide audit the maintainer asked for.
 
-Every query was served from the local index. GitHub is contacted only by the
+Every query was served locally from `relore`. GitHub is contacted only by the
 ingestion process, to keep the index fresh.
 
 That last step is what `why` makes direct:
