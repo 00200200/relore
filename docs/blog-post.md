@@ -3,12 +3,12 @@
 On 8 September somebody opened
 [an issue](https://github.com/huggingface/transformers/issues/48630) on
 Transformers: `GPTNeoXJapanese` crashes for any `rotary_pct != 1.0`, because
-RoPE ignores `partial_rotary_factor`. Within a day a contributor had posted a
-correct diagnosis, a maintainer had answered "a PR is very much welcome", and
+RoPE ignores `partial_rotary_factor`. 
 
-Within two days, two different people had opened fixes. When Serge picked up
-the issue, it was about to write another patch without realizing that work was
-already in flight.
+Within a day, a contributor had posted a correct diagnosis and a maintainer had
+answered, ‘a PR is very much welcome.’ Within two days, two different people
+had opened fixes. When Serge picked up the issue, it was about to write another
+patch without realizing that work was already in flight.
 
 All of this information existed on GitHub, but it was spread across separate
 issues, PRs, and comments. Looking at the issue alone did not reveal the work
@@ -19,8 +19,9 @@ which ones to fetch: the fix may live in another PR, the rationale in a review
 comment, and the relevant maintainer decision in a thread the current issue
 never links to.
 
-`relore` is what we built to improve this, an index of a repository's own
-history optimized for agents. Coding agents can search code, but they usually 
+`relore` is what we built for this: an index of a repository’s own history optimized for agents.
+
+Coding agents can search code, but they usually 
 cannot search the decisions that produced the code. `relore` gives them 
 queryable repository memory with provenance.
 
@@ -63,18 +64,15 @@ $ relore inflight 48630
    > fix: respect partial_rotary_factor in GPTNeoXJapaneseRotaryEmbedding
 ```
 
-We put `inflight` early in --help because it is usually the question an agent
+We put `inflight` early in `--help because it is usually the question an agent
 should answer first.
 
 Once the agent gets the overview of the situation, it digs into the discussions
-with `thread` where there is a clear distinction between contributor, bots and maintainers,
+with `thread` where there is a clear distinction between contributors, bots and maintainers,
 then does a couple of `search` calls and looks at the code via `copies` and/or `defs`.
 
-An agent in one of our field tests reported that
-`relore defs` gave it a better overview of a file than reading the whole thing.
-
-In that run, `defs` gave the agent the overview it needed for roughly 5% of the
-tokens it estimated for reading the whole file.
+In one field test, the agent reported that relore defs gave it a better
+overview of a file than reading the whole thing, for roughly 5% of the tokens.
 
 See the [field report](https://github.com/huggingface/relore/issues/8) it filed at the end of the run. 
 
@@ -94,7 +92,7 @@ the complete flow:
   which is what reframed the task;
 - learned the bug was one of several a refactor had regressed;
 - searched `partial_rotary_factor` across history, which is how it found the open
-  fix, crossing thread boundaries because the fix was not in the thread.
+  fix, crossing thread boundaries because the fix was not linked from the issue.
   `relore inflight` exists because of that call: finding it was a lucky side
   effect of a symbol search, and that failure mode deserved its own verb;
 - found the refactor that caused the regression;
@@ -109,9 +107,10 @@ exist? That is what `why` now makes direct.
 ```console
 relore why src/.../modeling_gpt_neox_japanese.py:90
 ```
+
 `git blame` tells you which commit last changed a line. `relore why` follows
 that commit to its pull request and surfaces the review comments around that
-line, which is the discussion that explains why the change was made.
+line, often recovering the discussion behind the change.
 
 ## Conclusion
 
