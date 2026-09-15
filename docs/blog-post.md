@@ -152,11 +152,47 @@ context.
 *History on one side, the code as it is today on the other, and one tool that
 can answer across both.*
 
-Not every piece of project history is equally authoritative.
-A maintainer explaining why an approach was rejected is different from a contributor
-speculating about a bug, or a bot posting generated text. relore keeps that
-provenance and exposes trust as part of search, so agents can restrict a query
-to authoritative sources when it matters.
+Not every piece of project history is equally authoritative. A maintainer
+explaining why an approach was rejected is different from a contributor
+speculating about a bug, or a bot posting generated text — and the difference is
+four tokens in front of a snippet.
+
+Back on the GPTNeoXJapanese bug. The maintainer's reply blamed "the linked PR",
+and finding which refactor that was is a vague question. Asked plainly, the
+answer is on the page but it is not first:
+
+```console
+$ relore search "standardize rope partial_rotary_factor refactor all models"
+1. #43020  [contributor claim]   7mo  Add mimo v2 flash
+2. #46121  [contributor claim]   3mo  `convert_rope_params_to_dict` raises `TypeError` …
+3. #39847  [authoritative]      13mo  🚨 [v5] Refactor RoPE for layer types
+```
+
+One flag:
+
+```console
+$ relore search "standardize rope partial_rotary_factor refactor all models" --trust authoritative
+1. #39847  [authoritative]  13mo  🚨 [v5] Refactor RoPE for layer types   @zucchini-nlp
+```
+
+That is the refactor that broke the model. It is by the same maintainer who
+wrote the comment on the issue, and the 🚨 marks it as a deliberate breaking
+change — two things the agent can act on before reading a single diff.
+
+**The tier is not our judgement, which is the point and also the limit.** It
+comes from GitHub's own `author_association`, narrowed against write access. That
+is right most of the time and wrong in one specific way. On
+[#28056](https://github.com/huggingface/transformers/issues/28056) — a
+34-comment argument about `use_cache` and gradient checkpointing — the comment
+that settles the design is @gante's, and GitHub reports him as `CONTRIBUTOR`
+because his org membership is private. He reads as a contributor claim. A
+`--kind rationale` query, which raises the floor to authoritative on its own,
+would not show it to you at all.
+
+So the tier is a lens, not a gate. Every page labels both and hides neither; the
+floor is something you raise when the question is specifically "what did the
+people who decide think", and it is worth remembering that it is GitHub's answer
+to who those people are, not ours.
 
 The [field report](https://github.com/huggingface/relore/issues/8) for the bug
 this post opened with is the whole trace. A cold agent, with no documentation
@@ -169,7 +205,7 @@ beyond `relore --help`:
   open fix — crossing thread boundaries, because the fix was not in the thread.
   `relore inflight` exists because of that call: it was a lucky side effect of a
   symbol search, and an agent's most expensive failure mode deserves a verb;
-- found the refactor that caused the regression;
+- found the refactor that caused the regression, with the flag above;
 - then moved to code inspection for the repo-wide audit the maintainer asked for.
 
 During that investigation, every query was served from the local Relore
