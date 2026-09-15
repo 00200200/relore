@@ -18,8 +18,9 @@ false.
 The worst case we've seen is when Copilot or some other bots add comments
 in PRs that are completely misleading.
 
-The `gh` client can be used to tap into that memory but suffers from 
-some limitation where the important data is missed or hard to recollect. 
+The `gh` client can be used to investigate through all PR and issues comments, 
+but suffers from  some limitation where the important data cam be 
+missed or hard to recollect. 
 
 `relore` is what we built to improve this, an index of a repository's own
 history optimized for agents. A better way to remember Transformers.
