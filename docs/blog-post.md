@@ -25,6 +25,12 @@ missed or hard to recollect.
 `relore` is what we built to improve this, an index of a repository's own
 history optimized for agents. A better way to remember Transformers.
 
+There are [proposals](https://arxiv.org/abs/2603.15566) to record decision
+context explicitly in git history. We started from the opposite end: projects
+should not have to change how they work. The knowledge already exists, trapped
+in years of GitHub discussions.
+
+
 ## What relore is
 
 `relore` (REpository LORE) indexes a repository's complete issue and
@@ -56,20 +62,10 @@ $ relore inflight 48630
 ```
 
 That's usually the first verb the agent will call because we've hinted it in `--help`.
-From there, a typical agent session can look like this:
 
-```
-relore inflight 47720
-relore thread 47720 --outline 
-relore why src/model.py:90 
-relore search "why is this cast here" --kind rationale --file src/model.py
-relore search --symbol GemmaRotaryEmbedding  
-relore copies compute_default_rope_parameters
-```
-
-The agents gets the overview of the situation, then digs into the discussion, 
-where there is a clear distinction between contributor, bots and maintainers, 
-then do a couple of searchs and look at the code via `copies` and/or `defs`.
+Once the agents gets the overview of the situation, it digs into the discussions
+with `threads` where there is a clear distinction between contributor, bots and maintainers, 
+then do a couple of `search` calls and look at the code via `copies` and/or `defs`.
 
 An agent in one of our field tests reported that
 `relore defs` gave it a better overview of a file than reading the whole thing,
@@ -78,11 +74,6 @@ An agent in one of our field tests reported that
 end of the run. `grep` and `rg` return matching lines and leave the model to
 reconstruct the program structure around them. Asking for the structure first,
 then reading only what matters, is an order of magnitude cheaper.
-
-There are [proposals](https://arxiv.org/abs/2603.15566) to record decision
-context explicitly in git history. We started from the opposite end: projects
-should not have to change how they work. The knowledge already exists, trapped
-in years of GitHub discussions.
 
 ## One run, end to end
 
@@ -109,7 +100,6 @@ That last step is what `why` makes direct:
 ```console
 relore why src/.../modeling_gpt_neox_japanese.py:90
 ```
-
 `git blame` tells you which commit last changed a line. `relore why` follows
 that commit to its pull request and surfaces the review comments around that
 line, which is the discussion that explains why the change was made.
@@ -128,40 +118,6 @@ to the code that exists today.
 
 It is open source, Apache 2.0, and works on any GitHub repository you are willing
 to index.
-
-## Try it
-
-```bash
-pip install "relore[postgres] @ git+https://github.com/huggingface/relore"
-
-export RELORE_DATABASE_URL=postgresql://localhost/relore
-export GITHUB_TOKEN=...   # issues:read + pull_requests:read, never write
-
-relored migrate
-relored backfill --repo owner/name    # the history
-relored authority --repo owner/name   # who had write access
-relored clone     --repo owner/name   # the working clone the code verbs read
-```
-
-`relored` owns the database; `relore` is a thin client and never touches it, so
-the index goes behind an HTTP API and the client points at it:
-
-```bash
-relored serve --port 8080             # in another terminal
-export RELORE_API=http://localhost:8080
-
-relore search "why is this cast here" --kind rationale --file src/model.py
-relore why src/model.py:42            # blame → the pull request → what reviewers said there
-```
-
-Set `RELORE_API`, or the client talks to our own deployment and cannot reach
-it; `relore status` will say so.
-
-A full history is resumable and takes about a day. `relored sample --repo
-owner/name --since YYYY-MM-DD` indexes a window in minutes if you want something
-smaller first. The clone is optional for the history verbs and required for the
-code side: without it `grep`, `symbol`, `copies`, `defs`/`refs` and `why` answer
-`503` naming that command. `relore --help` is the reference.
 
 The code is at [huggingface/relore](https://github.com/huggingface/relore).
 Issues and pull requests are welcome.
