@@ -5,56 +5,18 @@ On 8 September somebody opened
 Transformers: `GPTNeoXJapanese` crashes for any `rotary_pct != 1.0`, because
 RoPE ignores `partial_rotary_factor`. Within a day a contributor had posted a
 correct diagnosis, a maintainer had answered "a PR is very much welcome", and
-two different people had each opened a fix —
-[#48652](https://github.com/huggingface/transformers/pull/48652) and
-[#48672](https://github.com/huggingface/transformers/pull/48672) — neither
-aware of the other. The second one's author closed his own PR the next morning.
+two different people had each opened a fix. 
 
-Two days later one of our agents picked up the same issue and started writing a
-third.
-
-It was not being careless. This is the whole of what the issue hands you:
-
-```console
-$ gh issue view 48630 --repo huggingface/transformers --comments
-author:	vinitsonawane45
-association:	none
---
-I investigated this issue and confirmed the root cause. `GPTNeoXJapaneseAttention`
-correctly applies `partial_rotary_factor` when calculating `rotary_ndims`, but
-`GPTNeoXJapaneseRotaryEmbedding.compute_default_rope_parameters()` still uses the
-full `head_dim` […]
-
-I'd be interested in implementing this. Since you mentioned that you already have
-a fix and regression test ready, would you prefer to open the PR yourself […]
---
-author:	zucchini-nlp
-association:	member
---
-A PR is very much welcome @blipbyte , it had a few regressions under the linked PR
-and some of them were fixed by Cyril recently. I suppose we still missed a few
-models, so would be really cool if you can check all models and revert
-`partial_rotation` where it got deleted
---
-```
-
-A diagnosis, a "yes please", and — in the first comment — a third person
-offering to write the patch as well. Not one of them mentions that two already
-exist.
-
-Both pull requests say `Fixes #48630`, so GitHub does know. Its own answer to
-what closes this issue returns one of them:
-
-```console
-$ gh issue view 48630 --repo huggingface/transformers --json closedByPullRequestsReferences
-{"closedByPullRequestsReferences":[{"number":48652, …}]}
-```
-
-Not #48672 — closed and unmerged, so it no longer *will* close anything, which
-is exactly why it is the best evidence that this issue attracts duplicate work.
-
+Two days later Serge, our agent, picked up the same issue and started 
+writing a third without knowing there were already two. This happened 
+because `gh issue view` did not link all those events together and 
+it's easy to miss.
+ 
 `relore` is what we built to answer that question directly. It is an index of a
-repository's own history, described properly below. For now, one verb of it:
+repository's own history.
+
+For that specific case, `relore` has the `inflight` verb, that digs and
+provide a full overview of everything related to an issue:
 
 ```console
 $ relore inflight 48630
@@ -66,42 +28,19 @@ $ relore inflight 48630
    > fix: respect partial_rotary_factor in GPTNeoXJapaneseRotaryEmbedding
 ```
 
-**"Is somebody already fixing this?" is one call, before any work starts.**
+Knowing if someone else is doing something about it before doing any new work
+spares a lot of work for an agent. 
 
-## Three questions
+The two other questions that are useful to ask are: *Why is it like this?* 
+and *Is that still true?*
 
-That is the first of three, and they come in the order an agent hits them.
+We need the index to let us know why a fallback cannot be removed, 
+which approach was tried and rejected, what a maintainer made the 
+last five contributors change. This knowloedge is not in the codebase,
+it's reading all of the comments made in the issues and PRs over the years.
 
-**1. Is somebody already doing this?** Above. The most expensive thing an agent
-does is patch something that is already in review.
-
-**2. Why is it like this?** Why a fallback cannot be removed, which approach
-was tried and rejected, what a maintainer made the last five contributors
-change. Look again at the maintainer's reply on that issue: *"it had a few
-regressions under the linked PR… I suppose we still missed a few models, so
-would be really cool if you can check all models."* The task was never "fix this
-model", it was "a refactor broke several, some are already repaired, find the
-rest". A checkout contains the current state of a project. It does not contain
-the project's memory, and no amount of reading
-`modeling_gpt_neox_japanese.py` recovers that sentence.
-
-**3. Is that still true?** A three-year-old review is a claim about code that
-has moved since. Threads tell you what people decided; `grep` and `symbol` run
-against the repository at HEAD tell you whether it still holds. A contributor's
-claim confirmed against the code is stronger evidence than either alone.
-
-Agents waste work in two ways: **re-reading what is in the repository, and
-rediscovering what is not.** The story above is the second kind. We measured the
-first kind on ourselves. One run of our nightly triage agent spent 2.1 million
-input tokens and produced no fix, across 153 tool calls, 137 of which re-opened
-a file it had already opened. `modular_blt.py` came back 53 times, a different
-slice each time. The calls are cheap. The turn around each one is expensive,
-because every turn re-sends the whole conversation.
-
-Only the second kind is what this post is about. Re-reading is working memory
-inside one session, and an index of project history does nothing for it. What an
-index changes is the other half: the questions the repository cannot answer at
-any budget.
+But that also needs to be verified against the latest HEAD to make sure a 
+3 years old claim still hold, so grepping the code is still an important step.
 
 ## What relore is
 
