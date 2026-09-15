@@ -13,16 +13,36 @@ aware of the other. The second one's author closed his own PR the next morning.
 Two days later one of our agents picked up the same issue and started writing a
 third.
 
-It was not being careless. This is what the issue page hands you:
+It was not being careless. This is the whole of what the issue hands you:
 
 ```console
 $ gh issue view 48630 --repo huggingface/transformers --comments
+author:	vinitsonawane45
+association:	none
+--
+I investigated this issue and confirmed the root cause. `GPTNeoXJapaneseAttention`
+correctly applies `partial_rotary_factor` when calculating `rotary_ndims`, but
+`GPTNeoXJapaneseRotaryEmbedding.compute_default_rope_parameters()` still uses the
+full `head_dim` […]
+
+I'd be interested in implementing this. Since you mentioned that you already have
+a fix and regression test ready, would you prefer to open the PR yourself […]
+--
+author:	zucchini-nlp
+association:	member
+--
+A PR is very much welcome @blipbyte , it had a few regressions under the linked PR
+and some of them were fixed by Cyril recently. I suppose we still missed a few
+models, so would be really cool if you can check all models and revert
+`partial_rotation` where it got deleted
+--
 ```
 
-Two comments. One diagnosis, one "a PR is welcome". Neither mentions a fix.
-Both pull requests say `Fixes #48630` in their bodies, so GitHub does know —
-it records that as a cross-reference in the issue's *timeline*, which is not
-something an agent reading the thread ever sees.
+Two comments. A diagnosis and a "yes please" — and a third person, in the first
+one, offering to write the patch as well. Not one of them mentions that two
+already exist. Both pull requests say `Fixes #48630` in their bodies, so GitHub
+does know; it records that as a cross-reference in the issue's *timeline*, which
+is not something an agent reading the thread ever sees.
 
 One call answers it:
 
@@ -157,9 +177,10 @@ explaining why an approach was rejected is different from a contributor
 speculating about a bug, or a bot posting generated text — and the difference is
 four tokens in front of a snippet.
 
-Back on the GPTNeoXJapanese bug. The maintainer's reply blamed "the linked PR",
-and finding which refactor that was is a vague question. Asked plainly, the
-answer is on the page but it is not first:
+Back on the GPTNeoXJapanese bug. The reporter's own body says *"this is a
+regression from #39847"* — but that is a contributor's attribution, and acting
+on it means rewriting a model. Asked plainly, confirming it puts the answer on
+the page without putting it first:
 
 ```console
 $ relore search "standardize rope partial_rotary_factor refactor all models"
@@ -175,9 +196,18 @@ $ relore search "standardize rope partial_rotary_factor refactor all models" --t
 1. #39847  [authoritative]  13mo  🚨 [v5] Refactor RoPE for layer types   @zucchini-nlp
 ```
 
-That is the refactor that broke the model. It is by the same maintainer who
-wrote the comment on the issue, and the 🚨 marks it as a deliberate breaking
-change — two things the agent can act on before reading a single diff.
+The attribution is confirmed from the side that decides: authored by the same
+maintainer who answered the issue, and carrying the 🚨 that marks a deliberate
+breaking change. A contributor's claim and an authoritative thread agreeing is
+stronger than either alone, and it took one flag rather than a diff.
+
+**The flag is also the wrong one to reach for next, which is the part worth
+internalising.** The maintainer's real ask was *"check all models"*, and one of
+the models is in that first page — `#48241, MiniMaxM2 silently applies full-head
+RoPE`, a contributor's bug report. Raise the floor and it disappears, because
+"I hit this error" is a report and reports come from anyone. The tiers are not a
+quality ranking. Reports and judgements are different things, and the floor is
+for the second.
 
 **The tier is not our judgement, which is the point and also the limit.** It
 comes from GitHub's own `author_association`, narrowed against write access — and
