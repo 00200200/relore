@@ -544,6 +544,23 @@ replaces, so the cap is a hundred and the snippet sixty; and `thread 43121 --ful
 the paths are behind **`--files`** while the count and the truncation notice, which are what
 made that line load-bearing, stay.
 
+**A view the caller cannot find is a view that does not exist, and a flag is not a place
+to hide a caveat.** Measuring 0.3.15 on a controlled re-run produced three corrections
+(relore#71), and two of them are one rule. The capped page's own line ended at *"a thread
+is never returnable in full"* — true of the page, false of the verb — and named `--focus`,
+which returns ten of seventy too, so a caller reformulates and gets another ten; the
+`--files` pointer sat behind `presentation`, so the piped form said `98 of 98 — complete`
+with no sign that ninety-eight paths were one flag away. Both are the same error: **that
+something was withheld and is reachable is a caveat, in both forms; only what to want is
+advice.** The third is `--focus` **narrowing** an outline instead of ranking it — the one
+place a focus selects, because an outline's rows are already complete, so a narrowed one
+withholds nothing a second call cannot have. It is a disjunction, over every chunk, and it
+widens rather than emptying. Measured, it is also what turns a *capped* view into a
+complete one: `transformers#46419` goes from `100 of 639` at 3,179 tokens to `40 of 40` at
+1,695. Discoverability was **not** the binding constraint and the issue said so after the
+fact — the run had read `--outline` in `--help` and rolled `--focus` four more times — so
+the page line is the cheap experiment and the narrowing is what the trace pointed at.
+
 **An age is for reading; a date is for citing, and the page owes both.** Every comment,
 review and hit renders `8mo`, `15mo` — right for a reader, and not enough to *quote*, which
 is what an agent is asked for ("the decisive comment, with its author and its date"). With

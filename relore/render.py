@@ -41,6 +41,14 @@ TRUST_LABEL = {
 #: and ``test_render`` pins the two together so they cannot drift.
 COMPACT_CHARS = 160
 
+#: How many comments one ``--outline`` reaches
+#: (``relore.search.queries.MAX_OUTLINE_COMMENTS``). Needed here only to tell a capped
+#: page which sentence is true -- "lists all 68" or "a hundred at a time, and ``--after``
+#: sweeps the rest" -- and spelled again rather than imported, because this module may not
+#: reach :mod:`relore.search` (AGENTS.md invariant 1). ``test_render`` pins the two
+#: together so they cannot drift.
+OUTLINE_CAP = 100
+
 #: The flag each signal filter was spelled as on the command line. A zero page echoes
 #: them, because the caller's own `--error` is a *correct* fact about their bug that can
 #: still zero a query answering at rank 1 without it (huggingface/relore#47) -- and with
@@ -192,18 +200,36 @@ def _outline_lines(
     the reason to read a whole thread is usually that ranking has not worked. Each line
     carries the id to ask for it by, so the next call is ``--after`` or a search, never a
     re-roll of the same lottery.
+
+    A ``focus`` **narrows** it rather than ranking it (huggingface/relore#71), so the head
+    line has two denominators to keep apart: how many rows are here, and how many comments
+    they were drawn from. ``12 of 12 comments, carrying any of 'rope scaling' — 12 of 68
+    do`` is complete; ``12 of 68`` alone would read as a cap.
     """
     total = int(thread.get("comments_total") or 0)
     suppressed = int(thread.get("comments_machine_suppressed") or 0)
     shown = len(outline)
     visible = max(total - suppressed, shown)
-    clauses = [f"-- outline: {shown} of {visible} comments, oldest first"]
+    focus = thread.get("focus") or ""
+    matched = thread.get("outline_matched")
+    widened = bool(thread.get("outline_widened"))
+    # What the rows are *of*. A narrowed outline is still complete -- of the comments
+    # carrying a word -- and the denominator has to say which of the two completenesses
+    # this is, or a caller reads "12 of 68" as a cap (huggingface/relore#71).
+    reachable = matched if (focus and matched and not widened) else visible
+    clauses = [f"-- outline: {shown} of {reachable} comments, oldest first"]
+    if focus and not widened:
+        clauses.append(f"carrying any of {focus!r} — {matched} of {visible} do")
+    elif focus:
+        # Never an empty outline. The rows are the whole thread again, and the sentence
+        # for that is the caller's question finding nothing -- not the thread being quiet.
+        clauses.append(f"no comment carries any of {focus!r}, so this is the unnarrowed outline")
     if suppressed:
         clauses.append(f"{suppressed} machine-tier suppressed")
-    if shown < visible:
+    if shown < reachable:
         # The outline exists to be complete, so the one case where it is not has to be
         # louder here than a cap normally would be.
-        clauses.append(f"CAPPED at {shown}: {visible - shown} more this view did not reach")
+        clauses.append(f"CAPPED at {shown}: {reachable - shown} more this view did not reach")
     if thread.get("indexed_at"):
         clauses.append(f"current to {thread['indexed_at']}")
     lines = [", ".join(clauses) + " --"]
@@ -223,7 +249,8 @@ def _outline_lines(
         lines += [
             "",
             'read one: `relore thread <n> --focus "<words from its line above>"`; '
-            "sweep from here: `relore thread <n> --after <id>`",
+            "sweep from here: `relore thread <n> --after <id>`"
+            + ("" if focus else '; narrow this list: `--outline --focus "<words>"`'),
         ]
     return lines
 
@@ -336,18 +363,31 @@ def render_thread(
         lines.append(
             f"nothing follows that comment. It is at or after the last of this thread's "
             f"{visible} — which is also what you get by sweeping from a SAMPLED page, "
-            "whose last row is the thread's last comment."
-            + (
-                " `--outline` lists every comment, in order, with the id to resume from."
-                if presentation
-                else ""
-            )
+            "whose last row is the thread's last comment. `--outline` lists every "
+            "comment, in order, with the id to resume from."
         )
     for index, comment in enumerate(comments, start=1):
         lines += _hit_lines(index, comment, note=_passage_note(comment, comments))
     if visible > returned:
+        # **The way to the rest is a fact, in both forms** (huggingface/relore#71). This
+        # line is the one place a caller learns what a capped page means, and it used to
+        # end at "never returnable in full" -- true of *this* page and not of the verb,
+        # since `--outline` reaches every comment it is hiding. Piped there was no hint at
+        # all, so the flag was discoverable only by reading `--help`, which a caller reads
+        # once already stuck: measured on one run, the agent found `--outline` at call 36
+        # of 46 and had spent five `--focus` rolls on this exact thread first. The
+        # `--focus` suggestion stays, and stays presentation, because it is advice about
+        # what to want; naming the view that does not withhold is a property of the page.
+        reach = (
+            f" `--outline` lists all {visible} in one line each, with the id to read any "
+            "of them by."
+            if visible <= OUTLINE_CAP
+            else f" `--outline` lists them {OUTLINE_CAP} at a time, oldest first, with the "
+            "id to read any of them by; `--after <id>` sweeps the rest."
+        )
         lines.append(
-            f"({visible - returned} not shown: a thread is never returnable in full."
+            f"({visible - returned} not shown: a page is never the whole thread."
+            + reach
             + (
                 ' `--focus "<what you care about>"` ranks all of them.'
                 if presentation and not focus
@@ -464,6 +504,15 @@ def _file_lines(
     asked. Only the diff's own page is gated: the anchored and mentioned lists are a
     handful of paths by nature and are each other's cross-check.
 
+    **The withholding itself is a fact, and 0.3.15 shipped it as advice**
+    (huggingface/relore#71). The pointer to the flag was ``presentation`` only, so the
+    piped form -- which is the only form an agent ever reads -- said ``98 of 98 —
+    complete`` and stopped: a page that had served no paths at all, announcing itself
+    complete, with no sign that ninety-eight of them were one flag away. That is this
+    project's recurring failure shape (section 13.3) reintroduced by a flag meant to cut
+    tokens. *That* the paths are withheld and reachable is a caveat and is in both forms;
+    only what to do about it would have been advice, and here the two are one clause.
+
     A short list of *hits* is read as a weak positive; a *missing entry* is read as a
     negative fact. ``huggingface/transformers#39847`` is the case this exists for: 323
     changed files, 100 collected because the per-PR pass takes one page, and no
@@ -504,8 +553,12 @@ def _file_lines(
         # membership question, and answering it is the whole of what the paths are for.
         if files:
             lines.append("  " + ", ".join(changed))
-        elif presentation:
-            lines.append("  (`--files` lists them)")
+        else:
+            # Both forms. *That* the paths were withheld is a caveat, not advice, and
+            # 0.3.15 shipped it as advice: piped -- which is every agent -- the line read
+            # `98 of 98 — complete` and nothing else, so a page that had served no paths
+            # at all announced itself as complete (huggingface/relore#71).
+            lines.append("  (paths withheld; `--files` serves them)")
     elif collected:
         lines.append(
             f"changed files: {collected} of {total} collected. TRUNCATED: a path that is "
@@ -518,8 +571,8 @@ def _file_lines(
         )
         if files:
             lines += _path_block(changed, compact=compact, presentation=presentation)
-        elif presentation:
-            lines.append("  (`--files` lists the collected page)")
+        else:
+            lines.append("  (paths withheld; `--files` serves the collected page)")
     else:
         lines.append(
             f"changed files: none collected of {total}, so this thread cannot answer "

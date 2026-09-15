@@ -25,7 +25,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from functools import reduce
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import (
     Engine,
@@ -55,6 +55,7 @@ from relore.search.queries import (
     MAX_OUTLINE_COMMENTS,
     MAX_THREAD_COMMENTS,
     OUTLINE_CHARS,
+    OUTLINE_VIEW,
     PASSAGE_OVERFETCH,
     THREAD_ENDS,
     BackendInfo,
@@ -73,6 +74,24 @@ from relore.search.queries import (
 )
 from relore.search.ranking import WEIGHTS, RankSpec, half_life
 from relore.store import schema as s
+
+
+class _Comments(NamedTuple):
+    """What one thread's comment query produced: a page, or an outline standing in for one.
+
+    A tuple of six positional values grew a seventh and an eighth with the outline's focus
+    (huggingface/relore#71), and the caller unpacking them by position is the kind of line
+    where a reordering is silent. Named, and private to this module.
+    """
+
+    hits: tuple[Hit, ...]
+    total: int
+    matched: int | None
+    selection: str
+    suppressed: int
+    outline: tuple[Hit, ...] = ()
+    outline_matched: int | None = None
+    outline_widened: bool = False
 
 
 class SearchBackend(ABC):
@@ -516,7 +535,9 @@ class SearchBackend(ABC):
         ``focus`` **orders** which comments come back and never selects them -- see
         :meth:`_focused`. Without it the order is the opening and the closing of the
         thread rather than the first N: on a long thread the resolution is at the end, and
-        returning only the beginning reliably returns the part that was wrong.
+        returning only the beginning reliably returns the part that was wrong. With
+        ``outline`` it *narrows* instead, which is the one inversion of that rule and is
+        argued where it happens (:meth:`_outline`).
 
         ``outline`` and ``after`` are the two ways out of the page cap, and they exist
         because of what the cap does to a caller who needs the *whole* thread. Measured on
@@ -530,6 +551,9 @@ class SearchBackend(ABC):
         ``defs`` move applied to a discussion -- ask for the shape, then read the parts --
         and ``after`` turns the repeated sample into a sweep by starting the page after a
         comment the caller has already seen.
+
+        ``outline`` short-circuits the page: nothing selects the ten rows a caller is not
+        going to be shown (:meth:`_comments`).
         """
         with self.engine.connect() as conn:
             row = conn.execute(
@@ -570,9 +594,7 @@ class SearchBackend(ABC):
             meta = row._mapping["metadata"] or {}
             changed = meta.get("changed_files")
             body, body_chars, body_truncated = self._body(conn, row.id, full=full)
-            comments, total, matched, selection, suppressed, sketch = self._comments(
-                conn, row, focus, after=after, outline=outline
-            )
+            page = self._comments(conn, row, focus, after=after, outline=outline)
 
         return ThreadView(
             repo=row.repo,
@@ -588,7 +610,7 @@ class SearchBackend(ABC):
             body=body,
             body_chars=body_chars,
             body_truncated=body_truncated,
-            comments=comments,
+            comments=page.hits,
             files_changed=paths[CHANGED],
             files_anchored=paths[FROM_COMMENT],
             files_mentioned=paths[MENTIONED],
@@ -601,14 +623,16 @@ class SearchBackend(ABC):
             review_decision=meta.get("review_decision"),
             review_decision_by=tuple(meta.get("review_decision_by") or ()),
             requested_reviewers=tuple(meta.get("requested_reviewers") or ()),
-            total_documents=total,
-            machine_suppressed=suppressed,
+            total_documents=page.total,
+            machine_suppressed=page.suppressed,
             indexed_at=row.indexed_at,
-            selection=selection,
+            selection=page.selection,
             focus=focus,
-            focus_matched=matched,
-            outline=sketch,
-            outline_total=len(sketch),
+            focus_matched=page.matched,
+            outline=page.outline,
+            outline_total=len(page.outline),
+            outline_matched=page.outline_matched,
+            outline_widened=page.outline_widened,
             after=after,
         )
 
@@ -845,7 +869,7 @@ class SearchBackend(ABC):
 
     def _comments(
         self, conn: Any, thread: Any, focus: str, *, after: str = "", outline: bool = False
-    ) -> tuple[tuple[Hit, ...], int, int | None, str, int, tuple[Hit, ...]]:
+    ) -> _Comments:
         def documents(tiers: tuple[str, ...]) -> Select:
             return select(
                 s.documents.c.id,
@@ -879,6 +903,25 @@ class SearchBackend(ABC):
         # a thread we hold one for, which is the sentence for a thread nobody has touched
         # (huggingface/relore#28). Counted here because only this query knows.
         suppressed = len(_passage_counts(conn, documents((MACHINE_TRUST,))))
+
+        if outline:
+            # The outline *replaces* the page (``render_thread`` returns after it), so the
+            # page's own selection is work nobody reads -- and on a focused outline it is
+            # the expensive half, an FTS pass and an overfetch for ten rows that are
+            # discarded. Measured on ``transformers#46419`` (644 comments) the whole call
+            # is single-digit milliseconds either way; this is here because computing an
+            # answer in order to throw it away is how the two selections drift apart.
+            sketch, sketch_matched, widened = self._outline(conn, remaining, passages, focus)
+            return _Comments(
+                hits=(),
+                total=total,
+                matched=None,
+                selection=OUTLINE_VIEW,
+                suppressed=suppressed,
+                outline=sketch,
+                outline_matched=sketch_matched,
+                outline_widened=widened,
+            )
 
         matched: int | None = None
         if focus.strip():
@@ -927,12 +970,17 @@ class SearchBackend(ABC):
             )
             for row in rows
         )
-        sketch = self._outline(conn, remaining, passages) if outline else ()
-        return hits, total, matched, selection, suppressed, sketch
+        return _Comments(
+            hits=hits, total=total, matched=matched, selection=selection, suppressed=suppressed
+        )
 
     def _outline(
-        self, conn: Any, base: Select, passages: dict[tuple[str, str], int]
-    ) -> tuple[Hit, ...]:
+        self,
+        conn: Any,
+        base: Select,
+        passages: dict[tuple[str, str], int],
+        focus: str = "",
+    ) -> tuple[tuple[Hit, ...], int | None, bool]:
         """Every comment, one line's worth each, oldest first (relore#70).
 
         Honours ``--after``, so a thread too long to outline whole is swept rather than
@@ -946,27 +994,68 @@ class SearchBackend(ABC):
         usually that ranking it has not worked -- which is exactly the run this came from.
         :data:`OUTLINE_CHARS` is deliberately short of quotable: this says *which* comment
         to ask for, and a line long enough to answer with would make it another page.
+
+        **``focus`` narrows it, and does not reorder it** (huggingface/relore#71). Both
+        times the measured run reached for an outline it ran ``--outline --json`` through a
+        client-side filter -- 411 and 236 tokens against ~2,593 for the rendered outline of
+        the same thread. It wanted the ids carrying a word, not the index; so that is a
+        flag rather than a pipeline. It is the one place in this codebase where a focus
+        *selects*, and the reason the rule holds elsewhere is the reason it inverts here:
+        an outline's rows are already complete, so a narrowed one withholds nothing a
+        second call cannot have, while a narrowed *page* would be ten of seventy chosen by
+        a conjunction nobody could see.
+
+        Which is why the match is a **disjunction, in Python, over every chunk**. A
+        conjunction is what empties a thread page as soon as a caller passes a sentence
+        (:meth:`_focused`), and an outline that came back empty would read as "no comment
+        in this thread mentions that" -- the one thing it did not mean. Over every chunk
+        because the outline's row is a comment's *first* document and its terms may be in
+        its fourth. And if nothing carries a term the view widens back to the whole
+        outline and says so, rather than handing back a page whose emptiness is a property
+        of the question (huggingface/relore#47).
         """
-        rows = _one_per_comment(_chronological(conn, base, None))[:MAX_OUTLINE_COMMENTS]
-        return tuple(
-            Hit(
-                repo="",
-                number=0,
-                thread_type="",
-                title="",
-                source_type=row.source_type,
-                url=row.url,
-                author=row.author,
-                trust=row.trust,
-                age=render_age(row.github_created_at),
-                snippet=snippet(row.body_text, limit=OUTLINE_CHARS),
-                score=0.0,
-                created_at=row.github_created_at,
-                source_id=str(row.source_id or ""),
-                chunk_index=int(row.chunk_index or 0),
-                passages=passages.get((row.source_type, row.source_id), 1),
-            )
-            for row in rows
+        rows = _chronological(conn, base, None)
+        matched: int | None = None
+        widened = False
+        # Lowercased on both sides: `tokenize` does not case-fold (it feeds engines that
+        # do), and a caller who types a word the way GitHub renders it -- `RoPE`, `Cache`
+        # -- must not get an empty narrowing out of it.
+        terms = tuple(term.lower() for term in tokenize(focus))
+        if terms:
+            carrying = {
+                (row.source_type, row.source_id)
+                for row in rows
+                if any(term in (row.body_text or "").lower() for term in terms)
+            }
+            matched = len(carrying)
+            if carrying:
+                rows = [row for row in rows if (row.source_type, row.source_id) in carrying]
+            else:
+                widened = True
+        sketch = _one_per_comment(rows)[:MAX_OUTLINE_COMMENTS]
+        return (
+            tuple(
+                Hit(
+                    repo="",
+                    number=0,
+                    thread_type="",
+                    title="",
+                    source_type=row.source_type,
+                    url=row.url,
+                    author=row.author,
+                    trust=row.trust,
+                    age=render_age(row.github_created_at),
+                    snippet=snippet(row.body_text, limit=OUTLINE_CHARS),
+                    score=0.0,
+                    created_at=row.github_created_at,
+                    source_id=str(row.source_id or ""),
+                    chunk_index=int(row.chunk_index or 0),
+                    passages=passages.get((row.source_type, row.source_id), 1),
+                )
+                for row in sketch
+            ),
+            matched,
+            widened,
         )
 
     def _focused(self, conn: Any, base: Select, focus: str) -> list[Any]:

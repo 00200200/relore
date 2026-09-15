@@ -109,6 +109,15 @@ def test_thread_takes_the_two_ways_past_the_page_cap_and_the_file_flag() -> None
     assert args.files is True
 
 
+def test_thread_narrows_an_outline_with_the_focus_it_already_has() -> None:
+    """One flag, two behaviours, argued at `_outline`: a focus orders a *page* and narrows
+    an *outline*. It is not a second flag because the caller's question is the same one
+    (huggingface/relore#71)."""
+    args = cli.build_parser().parse_args(["thread", "1", "--outline", "--focus", "rope"])
+
+    assert (args.outline, args.focus) == (True, "rope")
+
+
 def test_thread_defaults_to_the_page_it_always_served() -> None:
     """All three are additive: the default page is what it was before any of this."""
     args = cli.build_parser().parse_args(["thread", "1"])

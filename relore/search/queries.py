@@ -57,6 +57,10 @@ ENDS_AND_MIDDLE = "ends+middle"
 #: because it is a third selection and a reader has to know which one produced the page --
 #: a sweep's page is neither a sample nor a ranking.
 AFTER_CURSOR = "after"
+#: What ``--outline`` reports: not a page at all, which is the fourth thing a reader has to
+#: be able to tell apart. Chronological and complete to its cap, so neither "sampled" nor
+#: "ranked" describes it.
+OUTLINE_VIEW = "outline"
 #: How many of the ten each end gets. Small on purpose: the opening states the problem and
 #: the last word is usually the resolution, but everything else that matters is between
 #: them.
@@ -327,6 +331,16 @@ class ThreadView:
     #: contract (section 6) and the answer to "ten of seventy" cannot be a bigger page.
     outline: tuple[Hit, ...] = ()
     outline_total: int = 0
+    #: How many of the thread's comments carry *any* of ``focus``'s terms, when an outline
+    #: was narrowed by one (huggingface/relore#71) -- ``None`` when no focus was passed.
+    #: Any rather than every: a conjunction is what empties a thread page as soon as a
+    #: caller passes a sentence, and an empty outline would read as "no comment here
+    #: mentions that".
+    outline_matched: int | None = None
+    #: Whether that narrowing found nothing and the view fell back to the whole outline.
+    #: A zero-row page whose emptiness is a property of the question is the failure
+    #: huggingface/relore#47 was opened for; this is the same answer, one verb over.
+    outline_widened: bool = False
     #: The comment this page starts after, if the caller was sweeping (``--after``). A page
     #: that silently begins in the middle is the one thing worse than a page that stops.
     after: str = ""

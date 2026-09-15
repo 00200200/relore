@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from relore.render import (
     COMPACT_CHARS,
+    OUTLINE_CAP,
     render_inflight,
     render_search,
     render_thread,
@@ -290,6 +291,29 @@ def test_an_unfocused_thread_still_suggests_a_focus() -> None:
 # -- the tier filter, announced (huggingface/relore#28) -------------------
 
 
+def test_a_capped_page_names_the_view_that_does_not_withhold() -> None:
+    """The truncated page is the one place a caller learns what to do next, and it named
+    `--focus` -- which returns ten of seventy too, so the caller reformulates and gets
+    another ten. Measured: five `--focus` rolls on one thread before `--outline` was
+    reached at call 36 of 46 (huggingface/relore#71). A fact, so it is in both forms."""
+    payload = _thread(comments_returned=10, comments_total=68)
+
+    for out in (render_thread(payload), render_thread(payload, presentation=True)):
+        assert "`--outline` lists all 68 in one line each" in out
+    assert "a thread is never returnable in full" not in render_thread(payload), (
+        "true of this page, not of the verb: --outline reaches every comment it hides"
+    )
+
+
+def test_a_page_too_long_to_outline_whole_is_told_how_to_sweep_it() -> None:
+    payload = _thread(comments_returned=10, comments_total=644)
+
+    out = render_thread(payload)
+
+    assert f"`--outline` lists them {OUTLINE_CAP} at a time" in out
+    assert "`--after <id>` sweeps the rest" in out
+
+
 def test_a_thread_whose_only_comment_is_a_bots_does_not_claim_to_be_empty() -> None:
     """`0 of 0` is the sentence for a thread nobody has touched, and it was printed for a
     thread the index holds one machine-tier comment for. An agent reading it cannot tell
@@ -446,12 +470,24 @@ def test_the_paths_come_back_with_files() -> None:
     assert "src/a.py, src/b.py" in render_thread(payload, files=True)
 
 
-def test_a_complete_list_says_where_the_paths_went_at_a_terminal() -> None:
-    """Facts are never presentation; a pointer to a flag is."""
+def test_a_complete_list_says_where_the_paths_went_in_both_forms() -> None:
+    """*That* the paths were withheld is a caveat, not advice (huggingface/relore#71).
+
+    0.3.15 put the pointer behind `presentation`, so the piped form -- the only form an
+    agent reads -- said `1 of 1 — complete` and nothing else: a page that had served no
+    paths at all, announcing itself complete.
+    """
     payload = _thread(files_changed=["src/a.py"], files_total=1, files_collected=1)
 
-    assert "`--files`" in render_thread(payload, presentation=True)
-    assert "`--files`" not in render_thread(payload)
+    for out in (render_thread(payload), render_thread(payload, presentation=True)):
+        assert "paths withheld" in out and "`--files`" in out
+
+
+def test_a_truncated_list_says_the_paths_were_withheld_too() -> None:
+    payload = _thread(files_changed=["src/a.py", "src/z.py"], files_total=300, files_collected=2)
+
+    assert "paths withheld" in render_thread(payload)
+    assert "src/a.py" not in render_thread(payload)
 
 
 def test_the_anchored_and_mentioned_paths_are_not_gated() -> None:
@@ -520,6 +556,70 @@ def test_an_outline_that_did_not_reach_the_end_shouts_about_it() -> None:
 
     assert "outline: 100 of 644 comments" in out
     assert "CAPPED at 100: 544 more this view did not reach" in out
+
+
+def _outline_rows(n, start=0):
+    return [
+        {
+            "id": str(i),
+            "author": "bob",
+            "trust": "reported",
+            "age": "3d",
+            "source_type": "issue_comment",
+            "snippet": f"comment {i}",
+        }
+        for i in range(start, start + n)
+    ]
+
+
+def test_a_narrowed_outline_says_what_it_is_complete_of() -> None:
+    """`12 of 68` reads as a cap. A narrowed outline is complete -- of the comments
+    carrying a word -- and the page has two denominators to keep apart
+    (huggingface/relore#71)."""
+    payload = _thread(
+        comments_total=68,
+        focus="rope scaling",
+        outline_matched=12,
+        outline=_outline_rows(12),
+    )
+
+    out = render_thread(payload)
+
+    assert "outline: 12 of 12 comments" in out
+    assert "carrying any of 'rope scaling' — 12 of 68 do" in out
+    assert "CAPPED" not in out
+
+
+def test_a_narrowed_outline_that_is_still_capped_counts_against_the_matches() -> None:
+    payload = _thread(
+        comments_total=644,
+        focus="cache",
+        outline_matched=130,
+        outline=_outline_rows(100),
+    )
+
+    out = render_thread(payload)
+
+    assert "outline: 100 of 130 comments" in out
+    assert "CAPPED at 100: 30 more this view did not reach" in out
+
+
+def test_a_focus_that_carried_nothing_widens_instead_of_emptying() -> None:
+    """An empty outline would read as "no comment in this thread mentions that", which is
+    the one thing it did not mean (huggingface/relore#47, one verb over)."""
+    payload = _thread(
+        comments_total=8,
+        focus="quantization",
+        outline_matched=0,
+        outline_widened=True,
+        outline=_outline_rows(8),
+    )
+
+    out = render_thread(payload)
+
+    assert "no comment carries any of 'quantization', so this is the unnarrowed outline" in out
+    assert "outline: 8 of 8 comments" in out
+    assert "CAPPED" not in out
 
 
 def test_a_complete_outline_does_not_cry_truncation() -> None:
@@ -836,6 +936,14 @@ def test_the_compact_budget_is_the_one_the_server_applies_to_a_snippet() -> None
     from relore.search.queries import COMPACT_SNIPPET_CHARS
 
     assert COMPACT_CHARS == COMPACT_SNIPPET_CHARS
+
+
+def test_the_outline_cap_the_page_advertises_is_the_one_the_server_applies() -> None:
+    """The capped page tells a caller `--outline` lists them a hundred at a time. Same
+    boundary, same remedy: written twice, pinned here (huggingface/relore#71)."""
+    from relore.search.queries import MAX_OUTLINE_COMMENTS
+
+    assert OUTLINE_CAP == MAX_OUTLINE_COMMENTS
 
 
 def _why(**fields):

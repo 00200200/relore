@@ -204,7 +204,9 @@ def test_thread_states_how_much_it_withheld(wired, engine, fake, capsys) -> None
     out = _run(capsys, "thread", "1")
 
     assert "of 40 comments" in out
-    assert "never returnable in full" in out
+    assert "a page is never the whole thread" in out
+    # The way to the rest is on the page, not only in `--help` (huggingface/relore#71).
+    assert "`--outline` lists all 40" in out
 
 
 def test_thread_focus_ranks_the_answering_comment_first(wired, engine, fake, capsys) -> None:

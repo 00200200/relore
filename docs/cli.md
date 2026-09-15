@@ -245,8 +245,19 @@ a state is an act and `🤗` is not:
 
 ```
 -- 10 of 89 comments, SAMPLED not ranked: the first and last few and a spread of the middle --
-(79 not shown: a thread is never returnable in full. `--focus "<what you care about>"` ranks all of them.)
+(79 not shown: a page is never the whole thread. `--outline` lists them 100 at a time,
+ oldest first, with the id to read any of them by; `--after <id>` sweeps the rest.
+ `--focus "<what you care about>"` ranks all of them.)
 ```
+
+**The way to the rest is a fact, and it is on the page.** That line used to end at *"a
+thread is never returnable in full"* — true of the page, not of the verb, since `--outline`
+reaches every comment the page is hiding. Piped there was no pointer at all, so the flag
+was discoverable only by reading `--help`, which a caller reads once it is already stuck:
+measured on one run, the agent found `--outline` at call 36 of 46 and had spent five
+`--focus` rolls on that thread first (#71). The `--focus` suggestion stays, and stays
+presentation — it is advice about what to want; naming the view that withholds nothing is a
+property of the page.
 
 ### When ten is not enough: `--outline`, then `--after`
 
@@ -281,6 +292,31 @@ $ relore thread 46419 --outline --repo huggingface/transformers
 $ relore thread 46419 --outline --after 4980470657 --repo huggingface/transformers
 ```
 
+**A `--focus` narrows an outline rather than ranking it.** It is the one place a focus
+*selects*, and the reason the rule holds elsewhere is the reason it inverts here: an
+outline's rows are already complete, so a narrowed one withholds nothing a second call
+cannot have, while a narrowed *page* would be ten of seventy chosen by a conjunction nobody
+could see. Measured: both times a run reached for an outline it piped `--outline --json`
+through a client-side filter — 411 and 236 tokens against ~2,593 for the rendered outline
+of the same thread (#71). So that is a flag now:
+
+```
+$ relore thread 46419 --outline --focus "flash attention" --repo huggingface/transformers
+-- outline: 40 of 40 comments, oldest first, carrying any of 'flash attention' — 40 of 639 do, … --
+```
+
+3,179 tokens to 1,695 on that thread — and, more to the point, **100 of 639 becomes 40 of
+40**: narrowing is what turns a capped view into a complete one.
+
+*Any* of the terms, not every one: a conjunction is what empties a thread page as soon as a
+caller passes a sentence, and an empty outline would read as "no comment here mentions
+that". A focus that carries nothing widens back to the whole outline and says so, rather
+than handing back a page whose emptiness is a property of the question (#47):
+
+```
+-- outline: 100 of 639 comments, oldest first, no comment carries any of 'quantization', so this is the unnarrowed outline, … --
+```
+
 `--after` works on the bodies too, and that is the point: pick the ids off the outline and
 read exactly those comments. A page asked with `--after` is **sequential**, not sampled —
 the next comments in order — because that is the only selection that can reach all of them.
@@ -298,13 +334,25 @@ comment.
 
 ### `--files`: the diff's paths, on request
 
-The changed-file **count** and its truncation notice are always on the page — a short list
+The changed-file **count**, its truncation notice, and *that the paths were withheld* are
+always on the page — a short list
 reads as a weak positive and a missing entry reads as a negative fact, and both of those
 are what make this line load-bearing. The paths themselves are behind `--files`. Measured
 on the same run: `thread 43121 --full` spent **1,350 tokens on 98 paths**, 51% of that page
 and 7% of every tool result in the whole session, and not one of them was referred to
 again. The anchored and mentioned lists are not gated — they are a handful of paths by
 nature and are each other's cross-check.
+
+```
+changed files: 98 of 98 — complete
+  (paths withheld; `--files` serves them)
+```
+
+0.3.15 put that second line behind `presentation`, which made the piped form — the only
+form an agent reads — say `98 of 98 — complete` and stop: a page that had served no paths
+at all, announcing itself complete, with no sign that ninety-eight of them were one flag
+away (#71). *That* the paths are withheld is a caveat, and every count, cap and caveat is
+in both forms.
 
 That wording is the fix for a real misreading: a bare `-- 10 of 89 comments --` was read as
 the ten *best*, so the agent concluded the thread held nothing further — while the review
@@ -702,7 +750,7 @@ tells you which — that distinction is deliberate (§12).
 
 ```
 $ relore status
-version   0.3.15
+version   0.3.16
 backend   postgresql / ts_rank_cd  capabilities: fulltext, weighted
 schema    applied [1, 2, 3, 4, 5, 6, 7], pending []
 index     55168 threads, 517276 documents, 332 raw objects

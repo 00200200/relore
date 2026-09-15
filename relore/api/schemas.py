@@ -335,6 +335,13 @@ def thread_json(view: ThreadView, *, compact: bool = False) -> dict[str, Any]:
         # `--outline` asked, so a caller can tell "not requested" from "nothing to show".
         "outline": [_outline_json(c) for c in view.outline],
         "outline_returned": len(view.outline),
+        # An outline narrowed by a focus is complete *of the comments carrying a word*,
+        # which is a different completeness from the unnarrowed one and has to be
+        # distinguishable without reading the rows (huggingface/relore#71). `widened` is
+        # the case where the focus carried nothing and the whole outline came back
+        # instead, so a caller never has to infer that from a count that did not shrink.
+        "outline_matched": view.outline_matched,
+        "outline_widened": view.outline_widened,
         # Where a sweep resumed. A page that silently begins in the middle is worse than
         # one that stops, so the cursor travels with the page that honoured it.
         "after": view.after,

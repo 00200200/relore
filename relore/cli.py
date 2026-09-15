@@ -223,7 +223,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     t = sub.add_parser("thread", help="one thread, comments ranked by relevance")
     t.add_argument("number", type=int)
-    t.add_argument("--focus", default="", help="rank the comments by this, best first")
+    t.add_argument(
+        "--focus",
+        default="",
+        help="rank the comments by this, best first — or, with --outline, keep only the "
+        "lines carrying one of these words",
+    )
     t.add_argument("--repo", help=_REPO_HELP)
     t.add_argument(
         "--full",
@@ -234,7 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--outline",
         action="store_true",
         help="one line per comment for the WHOLE thread, instead of a page of ten: "
-        "the shape first, then ask for the parts",
+        "the shape first, then ask for the parts; --focus narrows it to the lines "
+        "carrying a word",
     )
     t.add_argument(
         "--after",

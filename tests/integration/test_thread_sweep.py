@@ -23,7 +23,12 @@ from relore.api.schemas import thread_json
 from relore.ingest.index_thread import index_thread
 from relore.render import render_thread
 from relore.search import open_backend
-from relore.search.queries import AFTER_CURSOR, ENDS_AND_MIDDLE, MAX_OUTLINE_COMMENTS
+from relore.search.queries import (
+    AFTER_CURSOR,
+    ENDS_AND_MIDDLE,
+    MAX_OUTLINE_COMMENTS,
+    OUTLINE_VIEW,
+)
 
 REPO = "owner/name"
 
@@ -211,3 +216,98 @@ def test_the_outline_sweeps_too(engine: Engine, fake: FakeGitHub) -> None:
 
     assert len(rest) == 15
     assert not {r.source_id for r in first} & {r.source_id for r in rest}
+
+
+# -- the narrowed outline (huggingface/relore#71) ----------------------------
+
+
+def test_a_focus_narrows_the_outline_instead_of_ranking_it(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """Both times the measured run reached for an outline it ran `--outline --json` through
+    a client-side filter -- 411 and 236 tokens against ~2,593 for the rendered outline of
+    the same thread. It wanted the ids carrying a word, so that is a flag now."""
+    backend = _thread_of(engine, fake, 30)
+
+    view = backend.thread(REPO, 1, outline=True, focus="number 7")
+
+    # `7` is in 7 and 17 and 27; `number` is in all thirty. Any-term, so all thirty.
+    assert view.outline_matched == 30
+    assert len(view.outline) == 30
+    assert not view.outline_widened
+
+
+def test_the_narrowing_is_a_disjunction_not_a_conjunction(engine: Engine, fake: FakeGitHub) -> None:
+    """A conjunction is what empties a thread page as soon as a caller passes a sentence
+    (`_focused`), and an empty outline would read as "no comment here mentions that"."""
+    backend = _thread_of(engine, fake, 30)
+
+    view = backend.thread(REPO, 1, outline=True, focus="quantization 17")
+
+    assert [hit.source_id for hit in view.outline] == ["1017"]
+    assert view.outline_matched == 1
+
+
+def test_a_narrowing_that_carried_nothing_widens_rather_than_emptying(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    backend = _thread_of(engine, fake, 12)
+
+    view = backend.thread(REPO, 1, outline=True, focus="quantization")
+
+    assert view.outline_matched == 0
+    assert view.outline_widened is True
+    assert len(view.outline) == 12
+    out = render_thread({"thread": thread_json(view)})
+    assert "no comment carries any of 'quantization'" in out
+
+
+def test_the_narrowing_reads_every_chunk_of_a_comment(engine: Engine, fake: FakeGitHub) -> None:
+    """An outline row is a comment's *first* document, and its terms may be in its fourth.
+    Matching only the row would drop the long comments, which are the ones worth finding."""
+    issue = fake.add_issue(1, body="the opening post")
+    fake.add_comment(issue, 1000, "a short one", created_at="2026-01-01T00:00:00Z")
+    fake.add_comment(
+        issue,
+        1001,
+        "padding. " * 900 + " zzzunique tail",
+        created_at="2026-01-01T00:01:00Z",
+    )
+    with fake.client() as client:
+        index_thread(engine, client, fake.repo, 1)
+    backend = open_backend(engine)
+
+    view = backend.thread(REPO, 1, outline=True, focus="zzzunique")
+
+    assert [hit.source_id for hit in view.outline] == ["1001"]
+    assert view.outline_matched == 1
+
+
+def test_a_narrowed_outline_is_cased_the_way_the_caller_typed_it(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    backend = _thread_of(engine, fake, 12)
+
+    assert backend.thread(REPO, 1, outline=True, focus="COMMENT NUMBER 3").outline_matched == 12
+
+
+def test_the_narrowing_composes_with_the_cursor(engine: Engine, fake: FakeGitHub) -> None:
+    backend = _thread_of(engine, fake, 30)
+
+    view = backend.thread(REPO, 1, outline=True, focus="number", after="1020")
+
+    assert [hit.source_id for hit in view.outline] == [str(1021 + n) for n in range(9)]
+
+
+def test_an_outline_does_not_also_compute_a_page_nobody_reads(
+    engine: Engine, fake: FakeGitHub
+) -> None:
+    """`render_thread` returns after the outline, so the page's ten rows are work thrown
+    away -- and an answer computed in order to be discarded is how two selections drift."""
+    backend = _thread_of(engine, fake, 30)
+
+    view = backend.thread(REPO, 1, outline=True, focus="number")
+
+    assert view.comments == ()
+    assert view.selection == OUTLINE_VIEW
+    assert view.focus_matched is None, "the page's conjunction count is not the outline's"
