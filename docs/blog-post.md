@@ -180,19 +180,31 @@ wrote the comment on the issue, and the 🚨 marks it as a deliberate breaking
 change — two things the agent can act on before reading a single diff.
 
 **The tier is not our judgement, which is the point and also the limit.** It
-comes from GitHub's own `author_association`, narrowed against write access. That
-is right most of the time and wrong in one specific way. On
-[#28056](https://github.com/huggingface/transformers/issues/28056) — a
-34-comment argument about `use_cache` and gradient checkpointing — the comment
-that settles the design is @gante's, and GitHub reports him as `CONTRIBUTOR`
-because his org membership is private. He reads as a contributor claim. A
-`--kind rationale` query, which raises the floor to authoritative on its own,
-would not show it to you at all.
+comes from GitHub's own `author_association`, narrowed against write access — and
+that association is not a fact about the comment, it is computed when you ask.
+So when a maintainer leaves the organisation, everything they ever wrote quietly
+becomes a contributor claim.
 
-So the tier is a lens, not a gate. Every page labels both and hides neither; the
-floor is something you raise when the question is specifically "what did the
-people who decide think", and it is worth remembering that it is GitHub's answer
-to who those people are, not ours.
+On [#28056](https://github.com/huggingface/transformers/issues/28056) — a
+34-comment argument about `use_cache` and gradient checkpointing — the comment
+that settles the design is @gante's, written while he maintained that part of
+the library. He has since moved on, so GitHub now returns `CONTRIBUTOR` for it,
+and for his comments going back to 2023. Raising the floor hides the answer.
+
+We are fixing it
+([#74](https://github.com/huggingface/relore/issues/74)): merging a pull request
+*is* the write act and it is dated, so who held the keys and when is derivable
+from the history the index already holds — no API call, and no trusting the
+present tense about the past. It is a good example of what this whole project
+keeps running into. Provenance is the most useful thing in the index and the
+easiest thing to get subtly, silently wrong, and the failure is never an error
+message: it is a page that looks complete.
+
+Until then, the tier is a lens rather than a gate. Every page labels both tiers
+and hides neither, and raising the floor is something to do when the question is
+specifically "what did the people who decide think" — remembering that it is
+GitHub's answer to who those people are today, not ours, and not the repository's
+answer at the time.
 
 The [field report](https://github.com/huggingface/relore/issues/8) for the bug
 this post opened with is the whole trace. A cold agent, with no documentation
