@@ -59,7 +59,9 @@ So the answer is obtainable. It is just not on the page anybody read, and
 getting it means holding the suspicion first and then knowing a JSON field name
 or a search to run.
 
-One call answers it:
+`relore` is what we built so that this question has an answer rather than a
+prerequisite — an index of a repository's own history, described properly
+further down. For now, one verb of it:
 
 ```console
 $ relore inflight 48630
