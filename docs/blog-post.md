@@ -1,17 +1,70 @@
 # relore - searching the decisions behind the code
 
-A few weeks ago, Serge, one of the agents we use to maintain Transformers,
-spent 2.1 million input tokens on a single problem and produced no fix.
+On 8 September somebody opened
+[an issue](https://github.com/huggingface/transformers/issues/48630) on
+Transformers: `GPTNeoXJapanese` crashes for any `rotary_pct != 1.0`, because
+RoPE ignores `partial_rotary_factor`. Within a day a contributor had posted a
+correct diagnosis, a maintainer had answered "a PR is very much welcome", and
+two different people had each opened a fix —
+[#48652](https://github.com/huggingface/transformers/pull/48652) and
+[#48672](https://github.com/huggingface/transformers/pull/48672) — neither
+aware of the other. The second one's author closed his own PR the next morning.
 
-It made 153 tool calls. 137 of them re-opened a file it had already opened —
-`modular_blt.py` 53 times, a different slice of it each time. Those numbers are
-from our own job store, for one run of the nightly integration-failure triage.
+Two days later one of our agents picked up the same issue and started writing a
+third.
 
-The calls themselves are cheap. What is expensive is the turn around each one,
-because every turn re-sends the whole conversation.
+It was not being careless. This is what the issue page hands you:
 
-The agent wasn't doing anything obviously wrong. Transformers is just a very
-large codebase, and reading it one file at a time is expensive.
+```console
+$ gh issue view 48630 --repo huggingface/transformers --comments
+```
+
+Two comments. One diagnosis, one "a PR is welcome". Neither mentions a fix.
+Both pull requests say `Fixes #48630` in their bodies, so GitHub does know —
+it records that as a cross-reference in the issue's *timeline*, which is not
+something an agent reading the thread ever sees.
+
+One call answers it:
+
+```console
+$ relore inflight 48630
+2 threads claim to close huggingface/transformers#48630
+
+1. huggingface/transformers#48652 pr  open (approved)  5d  closes  @blipbyte
+   > [GPTNeoXJapanese] Fix RoPE ignoring partial_rotary_factor
+2. huggingface/transformers#48672 pr  closed by its author  5d  closes  @truongsontung
+   > fix: respect partial_rotary_factor in GPTNeoXJapaneseRotaryEmbedding
+```
+
+Two people had already written this patch. One of them threw his away. The
+question "is somebody already fixing this?" had an answer the whole time, and
+it was one join away from the issue the agent was reading.
+
+The maintainer's comment on that thread is worth more than either fix:
+
+> it had a few regressions under the linked PR and some of them were fixed by
+> Cyril recently. I suppose we still missed a few models, so would be really
+> cool if you can check all models and revert `partial_rotation` where it got
+> deleted
+
+The task was never "fix this model". It was "a refactor broke several models,
+some are already repaired, find the rest." No amount of reading
+`modeling_gpt_neox_japanese.py` tells you that. The agent's own
+[field report](https://github.com/huggingface/relore/issues/8) calls it the
+highest-value output of the session.
+
+That is the shape of the problem. The other half is what it costs. A few weeks
+ago Serge, one of the agents we use to maintain Transformers, spent 2.1 million
+input tokens on a single problem and produced no fix. It made 153 tool calls;
+137 of them re-opened a file it had already opened — `modular_blt.py` 53 times,
+a different slice of it each time. Those numbers are from our own job store,
+for one run of the nightly integration-failure triage. The calls themselves are
+cheap. What is expensive is the turn around each one, because every turn
+re-sends the whole conversation.
+
+Neither agent was doing anything obviously wrong. Transformers is a very large
+codebase, reading it one file at a time is expensive — and the things it does
+not contain are not in it at any price.
 
 ## Browsing the code
 
@@ -105,20 +158,19 @@ speculating about a bug, or a bot posting generated text. relore keeps that
 provenance and exposes trust as part of search, so agents can restrict a query
 to authoritative sources when it matters.
 
-You can see in https://github.com/huggingface/relore/issues/8 a field report of 
-an agent using relore to investigate a Transformers bug.
+The [field report](https://github.com/huggingface/relore/issues/8) for the bug
+this post opened with is the whole trace. A cold agent, with no documentation
+beyond `relore --help`:
 
-A fix was already open, eight hours old, and wasn't linked from the issue. The
-agent was about to write another patch.
-
-On that bug, a cold agent using only `relore --help` did the following:
-
-- read the issue and immediately extracted the authoritative maintainer comment;
-- learned that the bug was part of a broader regression;
-- searched partial_rotary_factor across history;
-- discovered an already-open fix PR that wasn't linked from the issue;
-- found the refactor that introduced the regression;
-- then moved to code inspection for the repo-wide audit.
+- read the issue and immediately separated the maintainer's comment from the
+  contributor's, which is what reframed the task;
+- learned the bug was one of several a refactor had regressed;
+- searched `partial_rotary_factor` across history, which is how it found the
+  open fix — crossing thread boundaries, because the fix was not in the thread.
+  `relore inflight` exists because of that call: it was a lucky side effect of a
+  symbol search, and an agent's most expensive failure mode deserves a verb;
+- found the refactor that caused the regression;
+- then moved to code inspection for the repo-wide audit the maintainer asked for.
 
 During that investigation, every query was served from the local Relore
 index—no GitHub API calls were made. GitHub is contacted by the ingestion
@@ -138,11 +190,11 @@ It connects the code that exists today back to the discussion that shaped it.
 
 ## What that changes
 
-The run this post opened with made 153 tool calls, 137 of them back into a file
-it had already opened, and produced no fix. It also had no way to ask about any
-of the history above: the agent's entire toolset was `grep`, `read_file`,
-`list_dir` and `fetch_url`, so every question in that list was unreachable from
-inside the task.
+The triage run above made 153 tool calls, 137 of them back into a file it had
+already opened, and produced no fix. It also had no way to ask about any of the
+history in that list: the agent's entire toolset was `grep`, `read_file`,
+`list_dir` and `fetch_url`, so "is somebody already fixing this?" was not a
+question it could ask, at any budget.
 
 The field-report run reached the root cause, the culprit PR and the already-open
 fix in about ten calls. A [later run](https://github.com/huggingface/relore/issues/58)
