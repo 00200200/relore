@@ -1,4 +1,4 @@
-# relore - searching the decisions behind the code
+# relore - repository memory for coding agents
 
 On 8 September somebody opened
 [an issue](https://github.com/huggingface/transformers/issues/48630) on
@@ -11,19 +11,14 @@ writing a third patch without knowing there were already two. This happened
 because `gh issue view` did not link all those events together and 
 it's easy to miss.
 
-In another case, our agent followed threads in a couple of PR and
-ended up building a patch based on a contributor claim that was completely
-false. 
-
-The worst case we've seen is when Copilot or some other bots add comments
-in PRs that are completely misleading.
-
 The `gh` client can be used to investigate through all PR and issues comments, 
 but suffers from  some limitation where the important data cam be 
 missed or hard to recollect. 
 
 `relore` is what we built to improve this, an index of a repository's own
-history optimized for agents. A better way to remember Transformers.
+history optimized for agents. Coding agents can search code, but they usually 
+cannot search the decisions that produced the code. `relore` gives them 
+queryable repository memory with provenance.
 
 There are [proposals](https://arxiv.org/abs/2603.15566) to record decision
 context explicitly in git history. We started from the opposite end: projects
@@ -69,11 +64,16 @@ then do a couple of `search` calls and look at the code via `copies` and/or `def
 
 An agent in one of our field tests reported that
 `relore defs` gave it a better overview of a file than reading the whole thing,
-**for roughly 5% of the tokens** — its own words, in the
+**for roughly 5% of the tokens in this run**  see
 [field report](https://github.com/huggingface/relore/issues/8) it filed at the
 end of the run. `grep` and `rg` return matching lines and leave the model to
 reconstruct the program structure around them. Asking for the structure first,
 then reading only what matters, is an order of magnitude cheaper.
+
+Provenance and trust were also a game changer during that field test: it changed 
+the interpretation of the task from fixing one model to auditing a regression across models.
+
+
 
 ## One run, end to end
 
