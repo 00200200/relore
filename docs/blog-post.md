@@ -42,17 +42,16 @@ A diagnosis, a "yes please", and — in the first comment — a third person
 offering to write the patch as well. Not one of them mentions that two already
 exist.
 
-Both pull requests say `Fixes #48630` in their bodies, so GitHub does know, and
-`gh` will tell you, if you already suspect and know where to ask:
+Both pull requests say `Fixes #48630`, so GitHub does know. Its own answer to
+what closes this issue returns one of them:
 
 ```console
 $ gh issue view 48630 --repo huggingface/transformers --json closedByPullRequestsReferences
 {"closedByPullRequestsReferences":[{"number":48652, …}]}
 ```
 
-One of the two. Not #48672 — that one is closed and unmerged, so it no longer
-counts as something that *will* close the issue, even though it is the single
-clearest piece of evidence that this issue attracts duplicate work.
+Not #48672 — closed and unmerged, so it no longer *will* close anything, which
+is exactly why it is the best evidence that this issue attracts duplicate work.
 
 `relore` is what we built so that this question has an answer rather than a
 prerequisite — an index of a repository's own history, described properly
@@ -153,10 +152,9 @@ explaining why an approach was rejected is different from a contributor
 speculating about a bug, or a bot posting generated text — and the difference is
 four tokens in front of a snippet.
 
-Back on the GPTNeoXJapanese bug. The reporter's own body says *"this is a
-regression from #39847"* — a contributor's attribution, and acting on it means
-rewriting a model. Confirming it puts the answer on the page without putting it
-first:
+Back on the GPTNeoXJapanese bug: the reporter's body claims *"this is a
+regression from #39847"*. That is a contributor's attribution, and acting on it
+means rewriting a model. One flag confirms it from the side that decides:
 
 ```console
 $ relore search "standardize rope partial_rotary_factor refactor all models"
@@ -169,16 +167,14 @@ $ relore search "…" --trust authoritative
 1. #39847  [authoritative]  13mo  🚨 [v5] Refactor RoPE for layer types   @zucchini-nlp
 ```
 
-The attribution is confirmed from the side that decides: authored by the same
-maintainer who answered the issue, carrying the 🚨 that marks a deliberate
-breaking change.
+Same maintainer who answered the issue, and the 🚨 marks a deliberate breaking
+change.
 
-**And the same flag is the wrong one to reach for next.** The maintainer's real
-ask was "check all models" — and one of those models is result 4, `MiniMaxM2
-silently applies full-head RoPE`, a contributor's bug report. Raise the floor and
-it disappears, because "I hit this error" is a report, and reports come from
-anyone. **Trust is provenance, not quality.** Reports and judgements are
-different things; the floor is for the second.
+**The same flag is the wrong one to reach for next.** The maintainer's real ask
+was "check all models", and one of them is result 4 — a contributor's bug
+report. Raise the floor and it vanishes, because "I hit this error" is a report,
+and reports come from anyone. **Trust is provenance, not quality**, and the
+floor is for judgements.
 
 Provenance also has to be **time-aware**, and ours is not yet. The tier comes
 from GitHub's `author_association`, which is not a fact about the comment — it is
@@ -277,14 +273,16 @@ relored backfill --repo owner/name && relored authority --repo owner/name
 relored clone    --repo owner/name    # the working clone the code verbs read
 
 relore search "why is this cast here" --kind rationale --file src/model.py
+relore why src/model.py:42   # blame → the pull request → what reviewers said there
 ```
 
 A full history is resumable and takes about a day; `relored sample --repo
 owner/name --since YYYY-MM-DD` indexes a window in minutes if you want to try it
 on something smaller first. Skip the `clone` step and the history verbs still
 work; the code verbs — `grep`, `symbol`, `copies`, `defs`/`refs` and `why` —
-answer `503` with a sentence naming that command, and nothing else degrades. `relored serve` then puts the index behind an HTTP API, which is
-how agents reach it, and `relore --help` is the reference.
+answer `503` with a sentence naming that command, and nothing else degrades.
+`relored serve` then puts the index behind an HTTP API, which is how agents
+reach it, and `relore --help` is the reference.
 
 The code is at [huggingface/relore](https://github.com/huggingface/relore).
 Issues and pull requests are welcome.
