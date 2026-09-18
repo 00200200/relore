@@ -6,8 +6,21 @@ The client and daemon must run the same version.
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-09-18
+
+First PyPI release. Earlier versions were distributed from Git and deployed as
+container images.
+
 ### Added
 
+- Lightweight `relore` client for searching issue and pull-request history, reading
+  threads, finding work in progress, and tracing code decisions with `why`.
+- `relored` service for ingestion, indexing, and ranked retrieval, with Postgres
+  support and SQLite for development.
+- Code navigation over local checkouts and daemon-managed clones, including
+  definitions, references, symbols, grep, and duplicate implementations.
+- Author trust filters, source attribution, and an untrusted-content envelope for
+  retrieved discussions.
 - PyPI release workflow: release branches run checks and validate distributions;
   version tags publish through GitHub OIDC trusted publishing.
 - Package metadata, `make build-release`, and a release guide.
@@ -16,6 +29,3 @@ The client and daemon must run the same version.
 
 - Moved the README quick start into the CLI guide; the README links to deployment
   and usage instructions.
-
-Earlier versions were distributed from Git and deployed as container images. This
-changelog starts with the PyPI release setup; no historical PyPI releases are implied.
