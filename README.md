@@ -23,6 +23,8 @@ what has been *said* about a function — a question `grep` cannot answer.
 server-side, no checkout on your side. A three-year-old review is a claim about code that
 has moved since.
 
+![Relore connects project history with current code to answer an agent's three questions.](docs/relore-diag.png)
+
 Threads tell you what people decided; the code verbs tell you whether it was true. A
 [contributor claim] confirmed by `grep` is stronger evidence than either alone — the
 argument for this over a search box.
@@ -32,30 +34,10 @@ alone and with no memory of the runs before. They filed 39 issues against the to
 are fixed, each run checking the last one's from the outside.
 [#8](https://github.com/huggingface/relore/issues/8) is the record.
 
-## Try it
+## Get started
 
-```bash
-pip install git+https://github.com/huggingface/relore   # no PyPI release yet
-export RELORE_API=https://your-relore  # a running `relored serve`
-export RELORE_REPO=owner/name          # the default for --repo
-export RELORE_TOKEN=…                  # if that daemon requires one
-
-relore inflight 47720 --repo owner/name              # ask this one first
-relore why src/model.py:90 --repo owner/name         # what was said about this line
-relore search "AttributeError: 'NoneType' object has no attribute 'shape'" --kind failure
-relore search "why is this cast here" --kind rationale --file src/model.py
-relore search --symbol GemmaRotaryEmbedding          # every mention, exactly matched
-relore copies compute_default_rope_parameters --repo owner/name   # which copies diverge
-```
-
-`--repo` is required on a bare number or path whenever the daemon serves more than one
-repository: it refuses rather than guessing which project you meant. `RELORE_REPO` is the
-default that makes the flag a per-call override instead of a per-call tax.
-
-`relore --help` is the reference — every verb, the order to reach for them in, and the
-environment. More worked queries, and the four ways a healthy index returns nothing:
-[`docs/cli.md`](docs/cli.md). There is no MCP server on purpose: any agent with a shell can
-already call an HTTP API.
+- [Deploy the service](docs/operations.md).
+- [Use relore](docs/cli.md).
 
 ## What you get
 
@@ -89,6 +71,8 @@ interface; setup is in [`docs/operations.md`](docs/operations.md).
 - [`docs/ranking.md`](docs/ranking.md) — the scoring model and what the benchmark says.
 - [`docs/operations.md`](docs/operations.md) — backfill, poll, clones, tokens, serving.
 - [`docs/security.md`](docs/security.md) — the properties and how each is enforced.
+- [`docs/release.md`](docs/release.md) — release branches, tags, and PyPI publishing.
+- [`CHANGELOG.md`](CHANGELOG.md) — notable changes by release.
 - [`docs/prior-art.md`](docs/prior-art.md) — related work, and what was borrowed.
 - [`AGENTS.md`](AGENTS.md) — the operating contract: the invariants with tests behind them.
 

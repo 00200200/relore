@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,7 +10,21 @@ dynamic = ["version"]
 description = "GitHub project memory: index a repository's issue/PR history and serve it to agents and humans"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "The Hugging Face Team", email = "transformers@huggingface.co" }]
+keywords = ["github", "issues", "search", "agents", "project-memory"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+]
 
 # The base install is the CLIENT. It must stay small enough to `pip install` inside a
 # constrained agent sandbox: no database driver, no parser, no ML stack.
@@ -36,6 +50,13 @@ relore = "relore.cli:main"
 # script and does NOT carry the daemon's dependencies, so the import has to be guarded or
 # a client-only install answers `relored --help` with a ModuleNotFoundError traceback.
 relored = "relore.entrypoints:relored"
+
+[project.urls]
+Homepage = "https://github.com/huggingface/relore"
+Repository = "https://github.com/huggingface/relore"
+Documentation = "https://github.com/huggingface/relore/tree/main/docs"
+Issues = "https://github.com/huggingface/relore/issues"
+Changelog = "https://github.com/huggingface/relore/blob/main/CHANGELOG.md"
 
 [project.entry-points."relore.languages"]
 python = "relore.code.providers.python:PythonProvider"

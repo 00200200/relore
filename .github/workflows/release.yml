@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["v*-release"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "pyproject.toml"
+      - "Makefile"
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  build_and_test:
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - run: python -m pip install --upgrade pip build twine
+      - name: Check release tag and changelog
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          from relore import __version__
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          assert re.fullmatch(r"v\d+\.\d+\.\d+(?:rc\d+)?", tag), f"Invalid release tag: {tag}"
+          assert tag == f"v{__version__}", f"Tag {tag} differs from package version {__version__}"
+          changelog = Path("CHANGELOG.md").read_text()
+          heading = rf"^## \[{re.escape(__version__)}\] - \d{{4}}-\d{{2}}-\d{{2}}$"
+          assert re.search(heading, changelog, re.MULTILINE), "Add a dated changelog entry before tagging"
+          PY
+      - run: make build-release PYTHON=python
+      - run: python -m twine check --strict dist/*
+      - name: Smoke test the wheel outside the checkout
+        run: |
+          python -m venv "$RUNNER_TEMP/release-smoke"
+          smoke="$RUNNER_TEMP/release-smoke/bin"
+          "$smoke/python" -m pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$smoke/relore" --version
+          "$smoke/relore" --help
+          "$smoke/python" - <<'PY'
+          import importlib.util
+          from importlib.metadata import version
+          from relore import __version__
+
+          assert version("relore") == __version__
+          for module in ("sqlalchemy", "fastapi", "psycopg", "tree_sitter"):
+              assert importlib.util.find_spec(module) is None, f"Client pulled in {module}"
+          PY
+          for wheel in "$GITHUB_WORKSPACE"/dist/*.whl; do
+            "$smoke/python" -m pip install "${wheel}[server,python]"
+          done
+          "$smoke/relored" --version
+          "$smoke/relored" --help
+          "$smoke/python" -m pip check
+      - name: Upload validated distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-dist
+          path: dist/*
+          if-no-files-found: error
+
+  upload_package:
+    needs: build_and_test
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-release
+      url: https://pypi.org/p/relore
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          verbose: true

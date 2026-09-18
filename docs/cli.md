@@ -1,9 +1,28 @@
 # Worked examples
 
-Setup, install and token wiring are in [`operations.md`](operations.md); the *why* is in the
-build plan, which is held with the deployment that commissioned it. This page is neither —
-it is what the queries actually look like, and the four ways they come back empty when the
-index is healthy.
+Deploy the service with the [operations guide](operations.md), then connect a client:
+
+## Quick start
+
+```bash
+pip install git+https://github.com/huggingface/relore   # no PyPI release yet
+export RELORE_API=https://your-relore  # a running `relored serve`
+export RELORE_REPO=owner/name          # the default for --repo
+export RELORE_TOKEN=…                  # if that daemon requires one
+
+relore inflight 47720 --repo owner/name              # ask this one first
+relore why src/model.py:90 --repo owner/name         # what was said about this line
+relore search "AttributeError: 'NoneType' object has no attribute 'shape'" --kind failure
+relore search "why is this cast here" --kind rationale --file src/model.py
+relore search --symbol GemmaRotaryEmbedding          # every mention, exactly matched
+relore copies compute_default_rope_parameters --repo owner/name   # which copies diverge
+```
+
+`--repo` is required on a bare number or path whenever the daemon serves more than one
+repository: it refuses rather than guessing which project you meant. `RELORE_REPO` is the
+default that makes the flag a per-call override instead of a per-call tax.
+
+`relore --help` lists every verb and option. Worked examples follow below.
 
 Every command below was run against a real index, Postgres backend. The deployment now
 holds three repositories — `huggingface/serge`, `huggingface/transformers`,

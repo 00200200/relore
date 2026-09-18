@@ -10,7 +10,7 @@ PYTHON ?= $(shell for p in python3.10 python3.11 python3.12 python3.13 python3; 
 VENV  := .venv
 STAMP := $(VENV)/.installed
 
-.PHONY: help install format lint test check clean
+.PHONY: help install format lint test check build-release clean
 
 help:
 	@echo "make install  create $(VENV) and install relore[dev] (editable)"
@@ -18,6 +18,7 @@ help:
 	@echo "make lint     ruff, read-only"
 	@echo "make test     pytest"
 	@echo "make check    lint + test -- what CI runs"
+	@echo "make build-release  clean and build wheel + sdist (requires build)"
 	@echo ""
 	@echo "interpreter:  $(PYTHON)"
 
@@ -42,6 +43,10 @@ test: $(STAMP)
 	$(VENV)/bin/pytest -q
 
 check: lint test
+
+build-release:
+	rm -rf build/ dist/ *.egg-info
+	$(PYTHON) -m build
 
 clean:
 	rm -rf $(VENV) .pytest_cache .ruff_cache *.egg-info
