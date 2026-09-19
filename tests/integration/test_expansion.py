@@ -19,7 +19,7 @@ from sqlalchemy import Engine
 
 from relore.ingest.index_thread import index_thread
 from relore.search import SearchQuery, expand, open_backend, search_expanded
-from relore.search.expansion import MAX_LEGS, MAX_PER_KIND, RRF_K
+from relore.search.expansion import MAX_LEGS, MAX_PER_KIND, RRF_K, rank_spec
 from relore.search.queries import MAX_HITS_PER_THREAD
 
 REPO = "owner/name"
@@ -222,6 +222,29 @@ def test_a_derived_test_id_does_not_replace_an_explicit_test_filter() -> None:
     _assert_legs_keep_explicit_filters(query)
 
 
+def test_a_skipped_derived_leg_still_counts_toward_ranking() -> None:
+    """The caller's ``--symbol`` suppresses the derived symbol *leg*, not the evidence: the
+    identifier is still in the text, so it must still weigh in the score."""
+    query = SearchQuery(repos=(REPO,), text=DERIVED_SYMBOL_TEXT, symbols=(SENTINEL_SYMBOL,))
+
+    assert not any(
+        leg.name == "symbol" and leg.term == "Qwen3_5MoeExperts" for leg in expand(query)
+    )
+    spec = rank_spec(query, expand(query))
+
+    assert "Qwen3_5MoeExperts" in spec.symbols
+    assert SENTINEL_SYMBOL in spec.symbols
+
+
+def test_ranking_does_not_add_signals_for_a_kind_the_caller_left_open() -> None:
+    """Only a *skipped* leg is folded in separately; an unscoped kind still arrives through
+    its own leg, so nothing is counted twice."""
+    query = SearchQuery(repos=(REPO,), text=DERIVED_SYMBOL_TEXT)
+    spec = rank_spec(query, expand(query))
+
+    assert spec.symbols.count("Qwen3_5MoeExperts") == 1
+
+
 # -- the merged search, against a real index --------------------------------
 
 
@@ -348,4 +371,4 @@ def test_expansion_does_not_admit_rows_outside_an_explicit_symbol_filter(
     constrained_numbers = {hit.number for hit in search_expanded(backend, constrained)}
 
     assert 47467 in unconstrained_numbers
-    assert 47467 not in constrained_numbers
+    assert constrained_numbers == {2}
